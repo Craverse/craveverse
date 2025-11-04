@@ -2,7 +2,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { MessageSquare, Swords, ShoppingCart, Trophy } from 'lucide-react';
+import { MessageSquare, Swords, ShoppingCart, Trophy, Crown } from 'lucide-react';
 
 interface QuickActionsProps {
   userTier?: string;
@@ -37,8 +37,15 @@ export function QuickActions({ userTier }: QuickActionsProps) {
         </Button>
         
         <Button asChild variant="outline" className="w-full justify-start">
-          <Link href="/pricing">
+          <Link href="/shop">
             <ShoppingCart className="h-4 w-4 mr-2" />
+            Rewards Shop
+          </Link>
+        </Button>
+        
+        <Button asChild variant="outline" className="w-full justify-start">
+          <Link href="/pricing">
+            <Crown className="h-4 w-4 mr-2" />
             Upgrade Plan
           </Link>
         </Button>

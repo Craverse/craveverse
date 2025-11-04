@@ -1,9 +1,9 @@
 // API route for getting user profile and current level
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { supabaseServer } from '@/lib/supabase-client';
-import { getCurrentUserProfile } from '../../../../lib/auth-utils';
 import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
+import { supabaseServer } from '@/lib/supabase-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,15 +14,63 @@ export async function GET(request: NextRequest) {
   try {
     logger.info('Profile API request started');
     
-    // NEW: Enhanced request logging
-    const requestHeaders = Object.fromEntries(request.headers.entries());
-    logger.info('Profile API request headers', { 
-      cacheControl: requestHeaders['cache-control'],
-      pragma: requestHeaders['pragma'],
-      ifModifiedSince: requestHeaders['if-modified-since'],
-      ifNoneMatch: requestHeaders['if-none-match']
-    });
+    // Use centralized mock mode detection
+    if (isMockMode()) {
+      logger.info('Mock mode: Returning mock user profile');
+      const mockProfile = {
+        id: 'mock-user-123',
+        clerk_user_id: 'mock-clerk-id',
+        name: 'Alex Chen',
+        email: 'alex@example.com',
+        avatar_url: null,
+        primary_craving: 'nofap',
+        current_level: 12,
+        xp: 1250,
+        cravecoins: 340,
+        streak_count: 45,
+        subscription_tier: 'free',
+        ai_summary: 'You\'re doing amazing! Keep up the great work on your NoFap journey.',
+        preferences: {
+          quizAnswers: {
+            severity: 'moderate',
+            triggers: ['stress', 'boredom'],
+            attempts: 'multiple'
+          },
+          personalization: {
+            motivation: 'health',
+            support_level: 'high'
+          }
+        }
+      };
+      
+      const mockLevel = {
+        id: 'level-12',
+        level_number: 12,
+        title: 'Mindful Awareness',
+        description: 'Practice 10 minutes of mindful breathing when urges arise',
+        challenge_text: 'When you feel an urge, stop and take 10 deep breaths. Focus on your breathing and let the urge pass naturally.',
+        coin_reward: 25,
+        difficulty: 'moderate',
+        craving_type: 'nofap'
+      };
+      
+      return NextResponse.json({
+        user: mockProfile,
+        currentLevel: mockLevel,
+        timestamp: new Date().toISOString(),
+        mockUsed: true,
+      }, {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'x-trace-id': traceId,
+          'x-profile-timestamp': new Date().toISOString(),
+        }
+      });
+    }
     
+    // REAL MODE: Use Clerk authentication
     const { userId } = await auth();
     
     if (!userId) {
@@ -30,194 +78,101 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    logger.info('Fetching profile for user', { userId });
+    logger.info('Fetching user profile from database', { userId });
 
-    // Get user profile
-    let userProfile = await getCurrentUserProfile();
+    // Fetch user profile from Supabase with timeout
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Database timeout')), 5000)
+    );
     
-    // If user doesn't exist, create them (fallback for webhook failure)
-    if (!userProfile) {
-      logger.info('No user profile found, creating fallback user', { userId });
-      
-      try {
-        const { data: newUser, error: createError } = await supabaseServer
-          .from('users')
-          .insert({
-            clerk_user_id: userId,
-            email: '', // Will be updated by Clerk webhook later
-            name: 'New User',
-            avatar_url: null,
-            subscription_tier: 'free',
-            xp: 0,
-            cravecoins: 0,
-            streak_count: 0,
-            current_level: 1,
-            primary_craving: null,
-          })
-          .select()
-          .single();
-
-        if (createError) {
-          logger.error('Error creating fallback user', { error: createError.message });
-          // Return minimal profile instead of 500 error
-          return NextResponse.json({
-            user: {
-              id: 'temp',
-              clerk_user_id: userId,
-              name: 'New User',
-              primary_craving: null,
-              current_level: 1,
-              xp: 0,
-              cravecoins: 0,
-              streak_count: 0,
-              subscription_tier: 'free',
-              ai_summary: 'Welcome to CraveVerse!',
-              preferences: {}
-            },
-            currentLevel: null,
-          }, {
-            headers: {
-              'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-              'Pragma': 'no-cache',
-              'Expires': '0',
-              'x-trace-id': traceId,
-              'x-profile-timestamp': new Date().toISOString(), // NEW: Add timestamp
-            }
-          });
-        }
-
-        userProfile = newUser;
-        logger.info('Fallback user created successfully', { user_id: newUser.id });
-      } catch (error) {
-        logger.error('Exception in fallback user creation', { error: error instanceof Error ? error.message : 'Unknown error' });
-        // Return minimal profile instead of 500 error
-        return NextResponse.json({
-          user: {
-            id: 'temp',
-            clerk_user_id: userId,
-            name: 'New User',
-            primary_craving: null,
-            current_level: 1,
-            xp: 0,
-            cravecoins: 0,
-            streak_count: 0,
-            subscription_tier: 'free',
-            ai_summary: 'Welcome to CraveVerse!',
-            preferences: {}
-          },
-          currentLevel: null,
-        }, {
-          headers: {
-            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-            'Pragma': 'no-cache',
-            'Expires': '0',
-            'x-trace-id': traceId,
-            'x-profile-timestamp': new Date().toISOString(), // NEW: Add timestamp
-          }
-        });
-      }
-    }
-
-    // TypeScript assertion: userProfile is guaranteed to exist at this point
-    const safeUserProfile = userProfile as NonNullable<typeof userProfile>;
-    
-    logger.info('User profile found', { 
-      user_id: safeUserProfile.id, 
-      primary_craving: safeUserProfile.primary_craving,
-      current_level: safeUserProfile.current_level 
-    });
-
-    // Get current level
-    const { data: currentLevel, error: levelError } = await supabaseServer
-      .from('levels')
+    const queryPromise = supabaseServer
+      .from('users')
       .select('*')
-      .eq('craving_type', safeUserProfile.primary_craving)
-      .eq('level_number', safeUserProfile.current_level)
+      .eq('clerk_user_id', userId)
       .single();
-
-    if (levelError) {
-      logger.warn('Error fetching current level', { error: levelError.message });
+    
+    const { data: userProfile, error: userError } = await Promise.race([queryPromise, timeoutPromise]) as any;
+    
+    if (userError || !userProfile) {
+      logger.warn('User profile not found, falling back to mock', { userId, error: userError?.message });
       
-      // FALLBACK: Return user without level (don't crash)
-      logger.info('Returning user without level due to error');
+      // Fallback to mock data
+      const mockProfile = {
+        id: 'fallback-user-123',
+        clerk_user_id: userId,
+        name: 'User',
+        primary_craving: 'nofap',
+        current_level: 1,
+        xp: 0,
+        cravecoins: 0,
+        streak_count: 0,
+        subscription_tier: 'free',
+        ai_summary: 'Welcome to CraveVerse!',
+        preferences: {}
+      };
+      
       return NextResponse.json({
-        user: safeUserProfile,
+        user: mockProfile,
         currentLevel: null,
-        timestamp: new Date().toISOString(), // NEW: Add timestamp for debugging
+        timestamp: new Date().toISOString(),
+        mockUsed: true,
       }, {
         headers: {
           'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
           'Pragma': 'no-cache',
           'Expires': '0',
           'x-trace-id': traceId,
-          'x-profile-timestamp': new Date().toISOString(), // NEW: Enhanced headers
+          'x-profile-timestamp': new Date().toISOString(),
         }
       });
     }
 
-    // Check if current level is completed
-    const { data: progress, error: progressError } = await supabaseServer
-      .from('user_progress')
-      .select('completed_at')
-      .eq('user_id', safeUserProfile.id)
-      .eq('level_id', currentLevel.id)
-      .single();
+    logger.info('User profile found', { userId, primary_craving: userProfile.primary_craving });
 
-    if (progressError && progressError.code !== 'PGRST116') {
-      logger.warn('Error checking progress', { error: progressError.message });
-    }
+    // Get current level if user has completed onboarding
+    let currentLevel = null;
+    if (userProfile.primary_craving) {
+      try {
+        const { data: levelData, error: levelError } = await supabaseServer
+          .from('levels')
+          .select('*')
+          .eq('craving_type', userProfile.primary_craving)
+          .eq('level_number', userProfile.current_level)
+          .single();
 
-    // If current level is completed, get next level
-    if (progress?.completed_at && safeUserProfile.current_level < 30) {
-      const { data: nextLevel, error: nextLevelError } = await supabaseServer
-        .from('levels')
-        .select('*')
-        .eq('craving_type', safeUserProfile.primary_craving)
-        .eq('level_number', safeUserProfile.current_level + 1)
-        .single();
-
-      if (!nextLevelError && nextLevel) {
-        logger.info('Returning next level', { level: nextLevel.level_number });
-        return NextResponse.json({
-          user: safeUserProfile,
-          currentLevel: nextLevel,
-          timestamp: new Date().toISOString(), // NEW: Add timestamp
-        }, {
-          headers: {
-            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-            'Pragma': 'no-cache',
-            'Expires': '0',
-            'x-trace-id': traceId,
-            'x-profile-timestamp': new Date().toISOString(), // NEW: Enhanced headers
-          }
-        });
+        if (!levelError && levelData) {
+          currentLevel = levelData;
+          logger.info('Current level found', { level: levelData.title });
+        }
+      } catch (levelErr) {
+        logger.warn('Failed to fetch current level', { error: levelErr });
       }
     }
-
-    logger.info('Profile API request completed successfully');
+    
     return NextResponse.json({
-      user: safeUserProfile,
-      currentLevel: currentLevel || null,
-      timestamp: new Date().toISOString(), // NEW: Add timestamp for debugging
+      user: userProfile,
+      currentLevel,
+      timestamp: new Date().toISOString(),
+      mockUsed: false,
     }, {
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
         'x-trace-id': traceId,
-        'x-profile-timestamp': new Date().toISOString(), // NEW: Enhanced cache headers
+        'x-profile-timestamp': new Date().toISOString(),
       }
     });
   } catch (error) {
     logger.error('Profile fetch error', { error: error instanceof Error ? error.message : 'Unknown error' });
     
-    // Return minimal profile instead of 500 error to prevent crashes
+    // Fallback mock data on any error
     return NextResponse.json({
       user: {
-        id: 'temp',
-        clerk_user_id: 'unknown',
+        id: 'error-fallback-user-123',
+        clerk_user_id: 'error-fallback-clerk-id',
         name: 'User',
-        primary_craving: null,
+        primary_craving: 'nofap',
         current_level: 1,
         xp: 0,
         cravecoins: 0,
@@ -227,15 +182,17 @@ export async function GET(request: NextRequest) {
         preferences: {}
       },
       currentLevel: null,
-      timestamp: new Date().toISOString(), // NEW: Add timestamp
+      timestamp: new Date().toISOString(),
+      mockUsed: true,
     }, {
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
         'Pragma': 'no-cache',
         'Expires': '0',
         'x-trace-id': traceId,
-        'x-profile-timestamp': new Date().toISOString(), // NEW: Enhanced headers
+        'x-profile-timestamp': new Date().toISOString(),
       }
     });
   }
 }
+

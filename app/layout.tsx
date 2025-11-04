@@ -1,11 +1,10 @@
 // Root layout for the application
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
-import { ClerkProvider } from '@clerk/nextjs';
 import { Toaster } from 'sonner';
-import { UserProvider } from '@/contexts/user-context';
-// import { PerformanceMonitor } from '@/components/performance-monitor';
 import './globals.css';
+import AppShell from '@/components/app-shell';
+import { Providers } from '@/components/providers';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -35,41 +34,17 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Check if we're in build phase - skip Clerk entirely during build
-  const isBuildTime = process.env.NEXT_PHASE === 'phase-production-build';
-  
-  // Check if we have a valid Clerk publishable key
-  const clerkPubKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-  const isValidClerkKey = clerkPubKey && 
-    clerkPubKey.startsWith('pk_') && 
-    !clerkPubKey.includes('placeholder') &&
-    clerkPubKey.length > 50; // Real Clerk keys are much longer
-
-  // Skip Clerk during build time OR if we don't have a valid key
-  if (isBuildTime || !isValidClerkKey) {
-    return (
-      <html lang="en">
-        <body className={inter.className}>
-          {children}
-          <Toaster position="top-right" />
-          {/* <PerformanceMonitor /> */}
-        </body>
-      </html>
-    );
-  }
-
-  // Runtime with valid key: use ClerkProvider for full auth functionality
   return (
-    <ClerkProvider>
-      <UserProvider>
-        <html lang="en">
-          <body className={inter.className}>
+    <html lang="en">
+      <body className={inter.className}>
+        <Providers>
+          <AppShell>
             {children}
-            <Toaster position="top-right" />
-            {/* <PerformanceMonitor /> */}
-          </body>
-        </html>
-      </UserProvider>
-    </ClerkProvider>
+          </AppShell>
+        </Providers>
+        <Toaster position="top-right" />
+        {/* <PerformanceMonitor /> */}
+      </body>
+    </html>
   );
 }

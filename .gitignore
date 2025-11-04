@@ -1,3 +1,14 @@
+.next
+.next-dev
+node_modules
+.env
+.env.local
+.env.production
+.env.development
+.DS_Store
+dist
+build
+*.log
 # Dependencies
 node_modules/
 npm-debug.log*

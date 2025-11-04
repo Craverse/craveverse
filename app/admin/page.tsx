@@ -9,11 +9,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useLogger } from '@/lib/logger';
 import { 
   Users, 
   DollarSign, 
   TrendingUp, 
-  AlertTriangle,
   Activity,
   Zap,
   Crown,
@@ -37,12 +37,14 @@ interface AdminMetrics {
 }
 
 export default function AdminPage() {
+  const logger = useLogger('AdminPage');
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTimeframe, setSelectedTimeframe] = useState('7d');
 
   useEffect(() => {
     fetchMetrics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTimeframe]);
 
   const fetchMetrics = async () => {
@@ -54,7 +56,7 @@ export default function AdminPage() {
         setMetrics(data.metrics);
       }
     } catch (error) {
-      console.error('Error fetching metrics:', error);
+      logger.error('Error fetching metrics', { error: error instanceof Error ? error.message : 'Unknown error' });
     } finally {
       setIsLoading(false);
     }

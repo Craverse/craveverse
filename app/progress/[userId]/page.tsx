@@ -4,132 +4,156 @@
 // Force dynamic rendering for auth-protected page
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { 
-  Trophy, 
-  Flame, 
-  Target, 
-  Star,
-  Crown,
-  Zap,
-  TrendingUp,
-  Share2,
-  Download
-} from 'lucide-react';
+import { Flame, Share2, Download, Trophy, Target, TrendingUp, Star } from 'lucide-react';
+import { useUserContext } from '@/contexts/user-context';
+import { ShareModal } from '@/components/progress/share-modal';
+import { ProgressChart } from '@/components/progress/progress-chart';
+
+interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  unlocked_at: string;
+}
+
+interface Activity {
+  action: string;
+  timestamp: string;
+  details: string;
+}
 
 interface ProgressData {
   username: string;
-  avatar: string;
   tier: string;
   xp: number;
   streak: number;
   levels_completed: number;
-  battles_won: number;
-  craving_type: string;
-  join_date: string;
-  achievements: Array<{
-    id: string;
-    name: string;
-    description: string;
-    icon: string;
-    unlocked_at: string;
-  }>;
-  recent_activity: Array<{
-    action: string;
-    timestamp: string;
-    details: string;
-  }>;
+  craving_type: string | null;
+  achievements: Achievement[];
+  recent_activity: Activity[];
 }
+
+const DEFAULT_ACHIEVEMENTS: Achievement[] = [
+  {
+    id: '1',
+    name: 'First Steps',
+    description: 'Completed your first level',
+    icon: '🎯',
+    unlocked_at: new Date().toISOString(),
+  },
+];
+
+const DEFAULT_ACTIVITY: Activity[] = [
+  {
+    action: 'Completed Level 1',
+    timestamp: new Date().toISOString(),
+    details: 'Mindful Awareness Challenge',
+  },
+];
 
 export default function ProgressPage() {
   const params = useParams();
-  const userId = params?.userId as string;
-  
+  const slug = params?.userId as string;
+  const { userProfile, isLoading: ctxLoading } = useUserContext();
+
   const [progressData, setProgressData] = useState<ProgressData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
+
+  const isCurrentUser = useMemo(() => {
+    if (!slug) return false;
+    if (!userProfile) return slug === 'me';
+    return slug === 'me' || slug === userProfile.id;
+  }, [slug, userProfile]);
 
   useEffect(() => {
-    fetchProgressData();
-  }, [userId]);
-
-  const fetchProgressData = async () => {
-    try {
-      setIsLoading(true);
-      const response = await fetch(`/api/progress/${userId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setProgressData(data.progress);
-      }
-    } catch (error) {
-      console.error('Error fetching progress data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleShare = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `${progressData?.username}'s CraveVerse Progress`,
-          text: `Check out ${progressData?.username}'s amazing progress on CraveVerse!`,
-          url: window.location.href,
+    async function loadProgress() {
+      if (!slug) return;
+      if (isCurrentUser) {
+        if (ctxLoading) return;
+        if (!userProfile) {
+          setIsLoading(false);
+          setProgressData(null);
+          return;
+        }
+        setProgressData({
+          username: userProfile.name,
+          tier: userProfile.subscription_tier,
+          xp: userProfile.xp,
+          streak: userProfile.streak_count,
+          levels_completed: Math.max(0, userProfile.current_level - 1),
+          craving_type: userProfile.primary_craving,
+          achievements: DEFAULT_ACHIEVEMENTS,
+          recent_activity: DEFAULT_ACTIVITY,
         });
-      } catch (error) {
-        console.error('Error sharing:', error);
+        setIsLoading(false);
+        return;
       }
-    } else {
-      // Fallback to copying URL
-      navigator.clipboard.writeText(window.location.href);
+
+      try {
+        setIsLoading(true);
+        const res = await fetch(`/api/progress/${slug}`);
+        if (!res.ok) {
+          setProgressData(null);
+        } else {
+          const json = await res.json();
+          const progress = json.progress || null;
+          if (progress) {
+            setProgressData({
+              username: progress.username ?? 'CraveVerse Explorer',
+              tier: progress.tier ?? 'free',
+              xp: progress.xp ?? 0,
+              streak: progress.streak ?? 0,
+              levels_completed: progress.levels_completed ?? 0,
+              craving_type: progress.craving_type ?? null,
+              achievements: progress.achievements ?? DEFAULT_ACHIEVEMENTS,
+              recent_activity: progress.recent_activity ?? DEFAULT_ACTIVITY,
+            });
+          } else {
+            setProgressData(null);
+          }
+        }
+      } catch (error) {
+        setProgressData(null);
+      } finally {
+        setIsLoading(false);
+      }
     }
-  };
+
+    loadProgress();
+  }, [slug, isCurrentUser, userProfile, ctxLoading]);
 
   const handleDownload = () => {
-    // Generate and download progress image
+    if (!progressData) return;
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    // Set canvas size
     canvas.width = 800;
     canvas.height = 600;
-
-    // Draw background
-    ctx.fillStyle = '#000000';
+    ctx.fillStyle = '#101828';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Draw content (simplified)
     ctx.fillStyle = '#fa9653';
-    ctx.font = 'bold 48px Arial';
+    ctx.font = '36px Arial';
     ctx.fillText('CraveVerse Progress', 50, 100);
-
     ctx.fillStyle = '#ffffff';
     ctx.font = '24px Arial';
-    ctx.fillText(`${progressData?.username}'s Journey`, 50, 150);
-
-    // Convert to image and download
+    ctx.fillText(`${progressData.username}`, 50, 150);
+    ctx.fillText(`Streak: ${progressData.streak} days`, 50, 190);
+    ctx.fillText(`Levels Completed: ${progressData.levels_completed}`, 50, 230);
     const link = document.createElement('a');
-    link.download = `${progressData?.username}-progress.png`;
+    link.download = `${progressData.username}-progress.png`;
     link.href = canvas.toDataURL();
     link.click();
   };
 
-  const getTierIcon = (tier: string) => {
-    switch (tier) {
-      case 'ultra':
-        return <Crown className="h-6 w-6 text-yellow-500" />;
-      case 'plus':
-        return <Zap className="h-6 w-6 text-blue-500" />;
-      default:
-        return <Star className="h-6 w-6 text-gray-500" />;
-    }
-  };
-
-  const getTierColor = (tier: string) => {
+  const getTierBadge = (tier: string) => {
     switch (tier) {
       case 'ultra':
         return 'bg-yellow-100 text-yellow-800';
@@ -140,21 +164,10 @@ export default function ProgressPage() {
     }
   };
 
-  const getCravingIcon = (craving: string) => {
-    const icons = {
-      nofap: '🚫',
-      sugar: '🍭',
-      shopping: '🛍️',
-      smoking_vaping: '🚭',
-      social_media: '📱',
-    };
-    return icons[craving as keyof typeof icons] || '🌐';
-  };
-
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-crave-orange"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-crave-orange" />
       </div>
     );
   }
@@ -164,7 +177,7 @@ export default function ProgressPage() {
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-4">
           <h1 className="text-2xl font-bold">Progress Not Found</h1>
-          <p className="text-muted-foreground">This user's progress is not available or private.</p>
+          <p className="text-muted-foreground">This progress link may be expired or private.</p>
         </div>
       </div>
     );
@@ -172,138 +185,70 @@ export default function ProgressPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold">{progressData.username}'s Progress</h1>
-              <p className="text-muted-foreground">
-                Journey to conquer {progressData.craving_type.replace('_', ' ')}
-              </p>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button onClick={handleShare} variant="outline">
+      <div className="container mx-auto px-4 py-8 space-y-8">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">{progressData.username}'s Progress</h1>
+            <p className="text-muted-foreground">
+              Journey to conquer {progressData.craving_type?.replace('_', ' ') || 'their cravings'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isCurrentUser && (
+              <Button variant="outline" onClick={() => setShowShareModal(true)}>
                 <Share2 className="h-4 w-4 mr-2" />
-                Share
+                Share Progress
               </Button>
-              <Button onClick={handleDownload} className="bg-crave-orange hover:bg-crave-orange-dark">
-                <Download className="h-4 w-4 mr-2" />
-                Download
-              </Button>
-            </div>
+            )}
+            <Button className="bg-crave-orange hover:bg-crave-orange-dark" onClick={handleDownload}>
+              <Download className="h-4 w-4 mr-2" />
+              Download Card
+            </Button>
           </div>
         </div>
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center space-x-4">
-                <div className="p-2 bg-crave-orange/10 rounded-lg">
-                  <TrendingUp className="h-6 w-6 text-crave-orange" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Total XP</p>
-                  <p className="text-2xl font-bold">{progressData.xp.toLocaleString()}</p>
-                </div>
+        <Card>
+          <CardContent className="p-6 flex items-center gap-4">
+            <div className="w-16 h-16 rounded-full bg-crave-orange/10 flex items-center justify-center text-2xl font-bold">
+              {progressData.username.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-xl font-semibold">{progressData.username}</h2>
+                <Badge className={getTierBadge(progressData.tier)}>{progressData.tier.toUpperCase()}</Badge>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center space-x-4">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <Flame className="h-6 w-6 text-green-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Current Streak</p>
-                  <p className="text-2xl font-bold">{progressData.streak} days</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center space-x-4">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Target className="h-6 w-6 text-blue-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Levels Completed</p>
-                  <p className="text-2xl font-bold">{progressData.levels_completed}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center space-x-4">
-                <div className="p-2 bg-yellow-100 rounded-lg">
-                  <Trophy className="h-6 w-6 text-yellow-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Battles Won</p>
-                  <p className="text-2xl font-bold">{progressData.battles_won}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* User Info */}
-        <Card className="mb-8">
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-4">
-              <div className="w-16 h-16 bg-crave-orange/20 rounded-full flex items-center justify-center">
-                <span className="text-2xl font-bold">
-                  {progressData.username.charAt(0).toUpperCase()}
-                </span>
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center space-x-2 mb-2">
-                  <h2 className="text-xl font-bold">{progressData.username}</h2>
-                  <Badge className={getTierColor(progressData.tier)}>
-                    {getTierIcon(progressData.tier)}
-                    <span className="ml-1">{progressData.tier.toUpperCase()}</span>
-                  </Badge>
-                </div>
-                <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                  <span className="flex items-center space-x-1">
-                    <span>{getCravingIcon(progressData.craving_type)}</span>
-                    <span>{progressData.craving_type.replace('_', ' ')}</span>
-                  </span>
-                  <span>Joined {new Date(progressData.join_date).toLocaleDateString()}</span>
-                </div>
-              </div>
+              <p className="text-sm text-muted-foreground">
+                Stay consistent to unlock higher tiers and exclusive rewards.
+              </p>
             </div>
           </CardContent>
         </Card>
 
-        {/* Achievements */}
-        {progressData.achievements.length > 0 && (
-          <Card className="mb-8">
+        <ProgressChart
+          xp={progressData.xp}
+          streak={progressData.streak}
+          levelsCompleted={progressData.levels_completed}
+          totalLevels={30}
+        />
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
+              <CardTitle className="flex items-center gap-2">
                 <Trophy className="h-5 w-5 text-crave-orange" />
-                <span>Achievements</span>
+                Achievements
               </CardTitle>
-              <CardDescription>
-                Unlocked achievements and milestones
-              </CardDescription>
+              <CardDescription>Milestones unlocked along the journey</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {progressData.achievements.map((achievement) => (
-                  <div key={achievement.id} className="flex items-center space-x-3 p-3 bg-muted rounded-lg">
+                  <div key={achievement.id} className="p-3 border rounded-lg flex items-start gap-3">
                     <div className="text-2xl">{achievement.icon}</div>
-                    <div className="flex-1">
+                    <div>
                       <div className="font-semibold">{achievement.name}</div>
                       <div className="text-sm text-muted-foreground">{achievement.description}</div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-xs text-muted-foreground mt-1">
                         Unlocked {new Date(achievement.unlocked_at).toLocaleDateString()}
                       </div>
                     </div>
@@ -312,37 +257,54 @@ export default function ProgressPage() {
               </div>
             </CardContent>
           </Card>
-        )}
 
-        {/* Recent Activity */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Star className="h-5 w-5 text-crave-orange" />
-              <span>Recent Activity</span>
-            </CardTitle>
-            <CardDescription>
-              Latest achievements and milestones
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {progressData.recent_activity.map((activity, index) => (
-                <div key={index} className="flex items-center space-x-3 p-3 bg-muted rounded-lg">
-                  <div className="w-2 h-2 bg-crave-orange rounded-full"></div>
-                  <div className="flex-1">
-                    <div className="font-medium">{activity.action}</div>
-                    <div className="text-sm text-muted-foreground">{activity.details}</div>
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {new Date(activity.timestamp).toLocaleDateString()}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Star className="h-5 w-5 text-crave-orange" />
+                Recent Activity
+              </CardTitle>
+              <CardDescription>Latest wins to celebrate</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {progressData.recent_activity.map((activity, idx) => (
+                <div key={idx} className="p-3 border rounded-lg">
+                  <div className="font-medium">{activity.action}</div>
+                  <div className="text-sm text-muted-foreground">{activity.details}</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {new Date(activity.timestamp).toLocaleString()}
                   </div>
                 </div>
               ))}
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="border-dashed border-crave-orange/40 bg-crave-orange/5">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-crave-orange" />
+              AI Weekly Summary (Coming soon)
+            </CardTitle>
+            <CardDescription>
+              Personalized insights and next steps powered by AI will appear here in Stage 2.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-center text-sm text-muted-foreground">
+              Stay tuned! This section will analyse your activity and recommend tailored actions once AI integrations are enabled.
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {isCurrentUser && (
+        <ShareModal
+          open={showShareModal}
+          onOpenChange={setShowShareModal}
+          onShare={setShareUrl}
+        />
+      )}
     </div>
   );
 }

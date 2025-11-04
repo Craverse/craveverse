@@ -2,19 +2,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-client';
-import { getCurrentUserProfile } from '../../../lib/auth-utils';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('leaderboard', traceId);
+  
   try {
+    if (isMockMode()) {
+      logger.info('Mock mode: returning mock leaderboard');
+      return NextResponse.json({ leaderboard: { overall: [], byCraving: {}, streaks: [], battles: [] }, mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
+
     const { userId } = await auth();
     
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile) {
+    // Verify user exists
+    const { data: userProfile, error: userError } = await supabaseServer
+      .from('users')
+      .select('id')
+      .eq('clerk_user_id', userId)
+      .single();
+
+    if (userError || !userProfile) {
+      logger.warn('User not found for leaderboard', { userId, error: userError?.message });
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -35,7 +52,7 @@ export async function GET(request: NextRequest) {
       .limit(100);
 
     if (overallError) {
-      console.error('Error fetching overall leaderboard:', overallError);
+      logger.error('Error fetching overall leaderboard', { error: overallError.message });
       return NextResponse.json(
         { error: 'Failed to fetch leaderboard data' },
         { status: 500 }
@@ -50,7 +67,7 @@ export async function GET(request: NextRequest) {
       .not('winner_id', 'is', null);
 
     if (battleError) {
-      console.error('Error fetching battle data:', battleError);
+      logger.warn('Error fetching battle data', { error: battleError.message });
     }
 
     // Get level completion counts
@@ -60,7 +77,7 @@ export async function GET(request: NextRequest) {
       .eq('status', 'completed');
 
     if (levelError) {
-      console.error('Error fetching level data:', levelError);
+      logger.warn('Error fetching level data', { error: levelError.message });
     }
 
     // Process data
@@ -82,7 +99,7 @@ export async function GET(request: NextRequest) {
     const overall = overallData?.map((user: any, index: number) => ({
       rank: index + 1,
       username: user.username,
-      avatar: '', // Would need to add avatar field
+      avatar: '', // Placeholder
       tier: user.plan_id || 'free',
       xp: user.xp || 0,
       streak: user.streak_days || 0,
@@ -93,11 +110,13 @@ export async function GET(request: NextRequest) {
 
     // Get streaks leaderboard
     const streaks = overall
+      .slice()
       .sort((a: any, b: any) => b.streak - a.streak)
       .map((user: any, index: number) => ({ ...user, rank: index + 1 }));
 
     // Get battles leaderboard
     const battles = overall
+      .slice()
       .sort((a: any, b: any) => b.battles_won - a.battles_won)
       .map((user: any, index: number) => ({ ...user, rank: index + 1 }));
 
@@ -114,6 +133,7 @@ export async function GET(request: NextRequest) {
     // Sort each craving group by XP
     Object.keys(byCraving).forEach(craving => {
       byCraving[craving] = byCraving[craving]
+        .slice()
         .sort((a: any, b: any) => b.xp - a.xp)
         .map((user: any, index: number) => ({ ...user, rank: index + 1 }));
     });
@@ -125,9 +145,9 @@ export async function GET(request: NextRequest) {
       battles,
     };
 
-    return NextResponse.json({ leaderboard });
+    return NextResponse.json({ leaderboard, mockUsed: false }, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
-    console.error('Leaderboard error:', error);
+    logger.error('Leaderboard error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

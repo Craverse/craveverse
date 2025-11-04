@@ -2,7 +2,6 @@
 // Handles batched AI processing and background tasks
 
 import { createClient } from '@supabase/supabase-js';
-import { CONFIG } from './config';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,

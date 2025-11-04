@@ -22,6 +22,7 @@ import {
 import { BattleCard } from '../../components/battles/battle-card';
 import { CreateBattleModal } from '../../components/battles/create-battle-modal';
 import { BattleStats } from '../../components/battles/battle-stats';
+import { useLogger } from '@/lib/logger';
 
 interface Battle {
   id: string;
@@ -47,6 +48,7 @@ interface BattleStats {
 }
 
 export default function BattlesPage() {
+  const logger = useLogger('BattlesPage');
   const [activeBattles, setActiveBattles] = useState<Battle[]>([]);
   const [completedBattles, setCompletedBattles] = useState<Battle[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -68,7 +70,7 @@ export default function BattlesPage() {
         setCompletedBattles(data.completedBattles);
       }
     } catch (error) {
-      console.error('Error fetching battles:', error);
+      logger.error('Error fetching battles', { error: error instanceof Error ? error.message : 'Unknown error' });
     } finally {
       setIsLoading(false);
     }
@@ -82,7 +84,7 @@ export default function BattlesPage() {
         setStats(data.stats);
       }
     } catch (error) {
-      console.error('Error fetching stats:', error);
+      logger.error('Error fetching stats', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
   };
 
@@ -140,6 +142,30 @@ export default function BattlesPage() {
             </Button>
           </div>
         </div>
+
+        {/* AI Challenge Generation Section */}
+        <Card className="border-crave-orange/20 bg-crave-orange/5 mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Zap className="h-5 w-5 text-crave-orange" />
+              <span>AI Challenge Generator</span>
+            </CardTitle>
+            <CardDescription>
+              Generate personalized battle challenges using AI
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {/* AI PLACEHOLDER: Battle challenge generation - AI integration coming in Stage 2 */}
+            <div className="p-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+              <div className="text-center">
+                <div className="text-4xl font-bold text-gray-400 mb-2">API</div>
+                <div className="text-sm text-gray-500" title="AI integration coming in Stage 2">
+                  AI-powered battle challenge generation
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Stats */}
         {stats && (

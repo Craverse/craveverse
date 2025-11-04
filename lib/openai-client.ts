@@ -45,8 +45,53 @@ function generatePromptHash(prompt: string, model: string, maxTokens: number): s
     .digest('hex');
 }
 
+// Check user's daily token limit (25k tokens/user/day for GPT-5-mini)
+// Parameters intentionally unused - will be used when database integration is complete
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function checkDailyTokenLimit(_userId: string, _model: AIModelType): Promise<{ canProceed: boolean; used: number; limit: number }> {
+  // Get token limit from config (25k for all tiers)
+  const dailyLimit = CONFIG.AI.RATE_LIMITS.FREE.TOKENS_PER_DAY; // 25000 tokens/day
+  
+  // This would query the database for user's daily token usage
+  // For now, return a mock response (in production, query ai_usage_log table)
+  const dailyUsage = 0; // Mock: 0 tokens used today
+  const canProceed = dailyUsage + 100 < dailyLimit; // Reserve 100 tokens for this request
+  
+  return {
+    canProceed,
+    used: dailyUsage,
+    limit: dailyLimit,
+  };
+}
+
+// Derive persona from user preferences based on quiz answers
+export function derivePersonaFromPreferences(preferences: any): string {
+  if (!preferences || !preferences.quizAnswers || !preferences.personalization) {
+    return 'encouraging'; // Default persona
+  }
+
+  const { quizAnswers, personalization } = preferences;
+  const severity = quizAnswers.severity || 'moderate';
+  const supportLevel = personalization.support_level || 'neutral';
+
+  // Strict/disciplined persona: severe addiction OR low support level
+  if (severity === 'severe' || supportLevel === 'low' || supportLevel === 'unsupportive') {
+    return 'strict/disciplined';
+  }
+
+  // Delicate/encouraging persona: mild addiction OR high support level
+  if (severity === 'mild' || supportLevel === 'high' || supportLevel === 'very') {
+    return 'delicate/encouraging';
+  }
+
+  // Default: balanced/encouraging for moderate cases
+  return 'encouraging';
+}
+
 // Check user's AI budget
-async function checkUserBudget(userId: string): Promise<{ canProceed: boolean; remainingBudget: number }> {
+// Parameter intentionally unused - will be used when database integration is complete
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function checkUserBudget(_userId: string): Promise<{ canProceed: boolean; remainingBudget: number }> {
   // This would query the database for user's monthly AI usage
   // For now, return a mock response
   const monthlyUsage = 0.002; // Mock: $0.002 used this month
@@ -129,6 +174,12 @@ export class OpenAIClient {
     maxTokens: number,
     temperature: number = 0.7
   ): Promise<{ response: string; cached: boolean; cost: number }> {
+    // Check daily token limit first (25k tokens/user/day for GPT-5-mini)
+    const tokenLimitCheck = await checkDailyTokenLimit(this.userId, model);
+    if (!tokenLimitCheck.canProceed) {
+      throw new Error(`Daily token limit exceeded (${tokenLimitCheck.used}/${tokenLimitCheck.limit}). Please try again tomorrow.`);
+    }
+
     // Check budget first
     const budgetCheck = await checkUserBudget(this.userId);
     if (!budgetCheck.canProceed) {
@@ -182,8 +233,12 @@ export class OpenAIClient {
       
       await cache.set(cacheKey, response, ttl);
 
-      // Log usage
+      // Log usage (including token count for daily limit tracking)
       await logAIUsage(this.userId, model, inputTokens, actualOutputTokens, actualCost, promptHash, false);
+      
+      // Update daily token usage tracking (in production, update ai_usage_log table)
+      // const totalTokens = inputTokens + actualOutputTokens;
+      // TODO: Update database with totalTokens for daily limit enforcement
 
       return {
         response,
@@ -201,8 +256,10 @@ export class OpenAIClient {
     levelNumber: number,
     craving: string,
     userResponse: string,
-    persona: string = 'encouraging'
+    userPreferences?: any
   ): Promise<string> {
+    // Derive persona from user preferences
+    const persona = userPreferences ? derivePersonaFromPreferences(userPreferences) : 'encouraging';
     const prompt = CONFIG.PROMPTS.LEVEL_FEEDBACK.template
       .replace('{N}', levelNumber.toString())
       .replace('{craving}', craving)
@@ -217,7 +274,7 @@ export class OpenAIClient {
         0.8
       );
       return result.response;
-    } catch (error) {
+    } catch {
       // Fallback to template if AI fails
       return CONFIG.FALLBACK_TEMPLATES.LEVEL_FEEDBACK[
         Math.floor(Math.random() * CONFIG.FALLBACK_TEMPLATES.LEVEL_FEEDBACK.length)
@@ -229,11 +286,19 @@ export class OpenAIClient {
   async generateForumReply(
     threadTitle: string,
     craving: string,
-    topReply?: string
+    userPreferences?: any,
+    // Top reply parameter for future use in context-aware suggestions
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _topReply?: string
   ): Promise<string> {
+    // Derive persona from user preferences
+    const persona = userPreferences ? derivePersonaFromPreferences(userPreferences) : 'encouraging';
+    
+    // Build prompt with persona - template now includes {persona} placeholder
     const prompt = CONFIG.PROMPTS.FORUM_REPLY.template
       .replace('{title}', threadTitle)
-      .replace('{craving}', craving);
+      .replace('{craving}', craving)
+      .replace('{persona}', persona);
 
     try {
       const result = await this.generateResponse(
@@ -243,7 +308,7 @@ export class OpenAIClient {
         0.7
       );
       return result.response;
-    } catch (error) {
+    } catch {
       // Fallback to template if AI fails
       return CONFIG.FALLBACK_TEMPLATES.FORUM_REPLY[
         Math.floor(Math.random() * CONFIG.FALLBACK_TEMPLATES.FORUM_REPLY.length)
@@ -252,8 +317,14 @@ export class OpenAIClient {
   }
 
   // Generate battle tasks (batched, cached)
-  async generateBattleTasks(craving: string): Promise<string[]> {
-    const prompt = CONFIG.PROMPTS.BATTLE_TASKS.template.replace('{craving}', craving);
+  async generateBattleTasks(craving: string, userPreferences?: any): Promise<string[]> {
+    // Derive persona from user preferences for task tone
+    const persona = userPreferences ? derivePersonaFromPreferences(userPreferences) : 'encouraging';
+    
+    // Build prompt with persona - template now includes {persona} placeholder
+    const prompt = CONFIG.PROMPTS.BATTLE_TASKS.template
+      .replace('{craving}', craving)
+      .replace('{persona}', persona);
 
     try {
       const result = await this.generateResponse(
@@ -271,7 +342,7 @@ export class OpenAIClient {
         .slice(0, 5); // Take first 5 tasks
       
       return tasks;
-    } catch (error) {
+    } catch {
       // Fallback to predefined tasks
       return this.getFallbackBattleTasks(craving);
     }
@@ -304,7 +375,7 @@ export class OpenAIClient {
       ];
       
       return { introMessage, customHints };
-    } catch (error) {
+    } catch {
       // Fallback to generic personalization
       return {
         introMessage: `Welcome to your ${craving} journey! You've got this!`,

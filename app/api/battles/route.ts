@@ -2,20 +2,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-client';
-import { getCurrentUserProfile } from '../../../lib/auth-utils';
 import { QueueUtils } from '../../../lib/queue';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('battles-list', traceId);
+
   try {
+    if (isMockMode()) {
+      logger.info('Mock mode: returning mock battles');
+      return NextResponse.json({ activeBattles: [], completedBattles: [], mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
+
     const { userId } = await auth();
     
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    const { data: userProfile, error: userError } = await supabaseServer
+      .from('users')
+      .select('id')
+      .eq('clerk_user_id', userId)
+      .single();
+
+    if (userError || !userProfile) {
+      logger.warn('User not found for battles list', { userId, error: userError?.message });
+      return NextResponse.json({ activeBattles: [], completedBattles: [], mockUsed: true }, { headers: { 'x-trace-id': traceId } });
     }
 
     // Get active battles (waiting or active)
@@ -39,7 +56,7 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false });
 
     if (activeError) {
-      console.error('Error fetching active battles:', activeError);
+      logger.error('Error fetching active battles', { error: activeError.message });
       return NextResponse.json(
         { error: 'Failed to fetch active battles' },
         { status: 500 }
@@ -68,7 +85,7 @@ export async function GET(request: NextRequest) {
       .limit(20);
 
     if (completedError) {
-      console.error('Error fetching completed battles:', completedError);
+      logger.error('Error fetching completed battles', { error: completedError.message });
       return NextResponse.json(
         { error: 'Failed to fetch completed battles' },
         { status: 500 }
@@ -78,9 +95,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       activeBattles: activeBattles || [],
       completedBattles: completedBattles || [],
-    });
+      mockUsed: false,
+    }, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
-    console.error('Battles fetch error:', error);
+    logger.error('Battles fetch error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -89,7 +107,19 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('battles-create', traceId);
+
   try {
+    if (isMockMode()) {
+      const { craving_type, duration_hours } = await request.json();
+      if (!craving_type || !duration_hours) {
+        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      }
+      logger.info('Mock mode: returning mock battle creation');
+      return NextResponse.json({ success: true, battle: { id: 'mock-battle', status: 'waiting' }, mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
+
     const { userId } = await auth();
     
     if (!userId) {
@@ -105,8 +135,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile) {
+    const { data: userProfile, error: userError } = await supabaseServer
+      .from('users')
+      .select('*')
+      .eq('clerk_user_id', userId)
+      .single();
+
+    if (userError || !userProfile) {
+      logger.warn('User not found for battle creation', { userId, error: userError?.message });
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -118,7 +154,7 @@ export async function POST(request: NextRequest) {
       .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
 
     if (recentError) {
-      console.error('Error checking recent battles:', recentError);
+      logger.warn('Error checking recent battles', { error: recentError.message });
     }
 
     const dailyLimit = userProfile.subscription_tier === 'free' ? 1 : 5;
@@ -160,7 +196,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (battleError) {
-      console.error('Error creating battle:', battleError);
+      logger.error('Error creating battle', { error: battleError.message });
       return NextResponse.json(
         { error: 'Failed to create battle' },
         { status: 500 }
@@ -185,7 +221,7 @@ export async function POST(request: NextRequest) {
           },
         });
     } catch (logError) {
-      console.error('Error logging activity:', logError);
+      logger.warn('Error logging activity', { error: logError });
     }
 
     return NextResponse.json({
@@ -202,9 +238,10 @@ export async function POST(request: NextRequest) {
         user2_tasks_completed: battle.user2_tasks_completed,
         created_at: battle.created_at,
       },
-    });
+      mockUsed: false,
+    }, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
-    console.error('Create battle error:', error);
+    logger.error('Create battle error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

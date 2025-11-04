@@ -1,179 +1,269 @@
-<!-- 648204ee-b8d4-41b2-b623-313954ee14de 52ac4509-e1ac-46ba-b368-46eda6ddca9b -->
-# Bulletproof Onboarding Architecture Refinement
+<!-- 648204ee-b8d4-41b2-b623-313954ee14de e301e3bc-777d-4d6a-8647-91f1dd4601d0 -->
+# Fix Signup Loop and Comprehensive Testing Strategy
 
-## Root Cause Analysis
+## Problem Analysis
 
-The emergency bypass is triggering because localStorage has `emergencyBypass: 'true'` set. The actual database connection works, but the flow has multiple architectural weaknesses:
+After successful signup, Clerk redirects to `/` (landing page), but:
 
-1. **Clerk Webhook → Supabase sync is working** (creates user with `primary_craving: null`)
-2. **Onboarding completion updates database** (sets `primary_craving`)
-3. **Dashboard checks fail** because emergency bypass takes precedence
-4. **No atomic transactions** - onboarding can partially fail
-5. **No state management** - relies only on database polling
+1. Landing page has no logic to redirect authenticated users
+2. SignUp component lacks redirect URL configuration
+3. No post-signup onboarding check on landing page
+4. Middleware doesn't redirect authenticated users away from public routes
 
-## Architectural Improvements
+## Phase 1: Fix Signup Redirect Loop
 
-### Phase 1: Remove Emergency Bypass & Clean State
+### 1.1 Configure Clerk SignUp Redirect URLs
 
-- Clear localStorage emergency flags from dashboard
-- Remove all emergency bypass logic (lines 128-189 in `app/dashboard/page.tsx`)
-- Add localStorage cleanup on dashboard mount
-- Keep the emergency bypass button as opt-in only (not auto-triggered)
+**File:** `app/sign-up/[[...sign-up]]/page.tsx`
 
-### Phase 2: Bulletproof Database Flow
+- Add `afterSignUpUrl` prop to `<SignUp />` pointing to `/onboarding`
+- Add `fallbackRedirectUrl` prop pointing to `/dashboard`
+- Ensure Clerk handles redirects after successful signup
 
-- Fix `lib/auth-utils.ts` to use centralized supabase client (currently creates its own)
-- Add transaction-like behavior to onboarding completion
-- Implement optimistic UI updates with server reconciliation
-- Add real-time database listeners for profile changes
+### 1.2 Add Landing Page Auth Check
 
-### Phase 3: Enhanced Debugging System
+**File:** `app/page.tsx`
 
-- Create centralized logger utility with debug levels
-- Add request tracing IDs across API calls
-- Implement detailed flow tracking:
-- Webhook receipt → User creation
-- Onboarding start → Completion
-- Dashboard mount → Profile fetch
-- Add debug panel component (collapsible) showing:
-- Current user state
-- Recent API calls
-- Database sync status
-- Clerk session info
+- Import `useUser` from `@clerk/nextjs` and `useUserContext`
+- Add `useEffect` to check if user is authenticated
+- If authenticated and onboarding incomplete → redirect to `/onboarding`
+- If authenticated and onboarding complete → redirect to `/dashboard`
+- Only run redirect logic in non-mock mode
 
-### Phase 4: Resilient Error Handling
+### 1.3 Enhance Middleware Redirect Logic
 
-- Never return 500 errors to frontend
-- Always provide actionable fallbacks
-- Add retry logic with exponential backoff
-- Implement circuit breaker pattern for API calls
+**File:** `middleware.ts`
 
-### Phase 5: State Management Refinement
+- After auth check, if user is authenticated and on public route (`/`), redirect based on onboarding status
+- Use server-side check via `hasCompletedOnboarding()` from `lib/auth-utils.ts`
+- Redirect to `/onboarding` if incomplete, `/dashboard` if complete
 
-- Add React Context for user profile state
-- Implement SWR or React Query for data fetching
-- Add optimistic updates for better UX
-- Cache with proper invalidation strategies
+### 1.4 Add Onboarding Status Check Utility
 
-## Implementation Steps
+**File:** `lib/auth-utils.ts`
 
-### Step 1: Fix auth-utils.ts Supabase Client
+- Ensure `hasCompletedOnboarding()` function works correctly
+- Add server-side helper to get onboarding status without full profile fetch
 
-**File**: `lib/auth-utils.ts`
+## Phase 2: Comprehensive Testing Strategy
 
-- Replace direct supabase client creation with centralized `supabaseServer`
-- This fixes inconsistent database connections
+### 2.1 Layer 1: Terminal & Build Validation
 
-### Step 2: Remove Emergency Bypass
+**Script:** `scripts/test-layer1-terminal.ps1` (new)
 
-**File**: `app/dashboard/page.tsx`
+- Check Node.js version (>=18.0.0)
+- Verify all dependencies installed (`npm list --depth=0`)
+- Run TypeScript compilation (`npm run type-check`)
+- Run ESLint (`npm run lint`)
+- Check for environment variables (`.env.local` exists)
+- Verify no port conflicts (3000, 5432, etc.)
+- Test build process (`npm run build`)
 
-- Remove lines 128-189 (emergency bypass logic)
-- Add `useEffect` to clear emergency localStorage on mount
-- Keep normal onboarding redirect logic
-- Add comprehensive console logging for debugging
+### 2.2 Layer 2: Authentication Flow Testing
 
-### Step 3: Add Centralized Logger
+**Test Cases:**
 
-**File**: `lib/logger.ts` (new)
+1. **Landing Page → Signup**
 
-- Create debug logger with trace IDs
-- Levels: DEBUG, INFO, WARN, ERROR
-- Format: `[TRACE_ID][COMPONENT][LEVEL] message`
-- Export hooks: `useLogger()`, `createLogger()`
+- Click "Get Started" button → navigates to `/sign-up`
+- SignUp component renders correctly
+- Clerk provider is active
 
-### Step 4: Add Debug Panel Component
+2. **Signup → Redirect**
 
-**File**: `components/debug-panel.tsx` (new)
+- Complete signup form
+- After successful signup → redirects to `/onboarding` (not `/`)
+- User is authenticated (verified via `useUser()`)
 
-- Collapsible panel (top-right corner)
-- Shows: User state, API calls, DB status, Clerk info
-- Only visible in development or with `?debug=true`
+3. **Authenticated User on Landing Page**
 
-### Step 5: Refactor Dashboard with Logging
+- If user visits `/` while authenticated:
+- Redirects to `/onboarding` if `primary_craving` is null
+- Redirects to `/dashboard` if `primary_craving` is set
 
-**File**: `app/dashboard/page.tsx`
+4. **Sign-In Flow**
 
-- Import and use centralized logger
-- Add trace ID to all API calls
-- Log each decision point
-- Add debug panel integration
+- Navigate to `/sign-in`
+- Complete sign-in → redirects based on onboarding status
+- No redirect loops
 
-### Step 6: Refactor Onboarding with Logging
+### 2.3 Layer 3: Onboarding Flow Testing
 
-**File**: `app/onboarding/page.tsx`
+**Test Cases:**
 
-- Add centralized logger
-- Add trace ID propagation
-- Log each step completion
-- Add retry logic with better UX
+1. **Onboarding Page Access**
 
-### Step 7: Enhance API Routes
+- Unauthenticated user → redirected to `/sign-up`
+- Authenticated user without `primary_craving` → can access
+- Authenticated user with `primary_craving` → redirected to `/dashboard`
 
-**Files**:
+2. **Onboarding Steps**
 
-- `app/api/user/profile/route.ts`
-- `app/api/onboarding/complete/route.ts`
-- `app/api/onboarding/personalize/route.ts`
+- Step 1: Craving selection works
+- Step 2: Quiz completion works
+- Step 3: AI personalization loads (or mock in dev)
+- Step 4: Results display correctly
+- Completion API call succeeds
+- After completion → redirects to `/dashboard`
 
-Changes:
+3. **Onboarding Data Persistence**
 
-- Add request trace IDs from headers
-- Use centralized logger
-- Never return 500 (return 200 with error flag)
-- Add detailed logging at each step
+- Verify data saved to Supabase (or mock)
+- `primary_craving` is set correctly
+- `preferences` contains quiz answers
 
-### Step 8: Add User Context Provider
+### 2.4 Layer 4: Dashboard & Protected Routes Testing
 
-**File**: `contexts/user-context.tsx` (new)
+**Test Cases:**
 
-- React Context for user profile
-- Automatic refresh on visibility change
-- Optimistic updates
-- Real-time sync status
+1. **Dashboard Access**
 
-### Step 9: Clean Up Debug Endpoints
+- Authenticated + onboarding complete → dashboard loads
+- Authenticated + onboarding incomplete → redirects to `/onboarding`
+- Unauthenticated → redirects to `/sign-up`
 
-**Keep**: `/api/health`, `/api/debug/env-check`, `/api/debug/db-schema`
-**Remove**: `/api/debug/setup-db`, `/api/debug/user-state` (move to debug panel)
+2. **Protected Routes**
 
-### Step 10: Test & Deploy
+- `/battles`, `/forum`, `/leaderboard` → require auth
+- Middleware redirects unauthenticated users to `/sign-up`
+- Authenticated users can access
 
-- Test complete flow with debug panel
-- Verify all logging works
-- Test error scenarios
-- Deploy to production
-- Monitor logs for any issues
+3. **User Profile Loading**
 
-## Key Files Modified
+- `UserContext` fetches profile correctly
+- Profile data displays in dashboard
+- Loading states work correctly
 
-1. `lib/auth-utils.ts` - Fix supabase client
-2. `lib/logger.ts` - NEW: Centralized logging
-3. `lib/supabase-client.ts` - Export additional utilities
-4. `components/debug-panel.tsx` - NEW: Debug UI
-5. `contexts/user-context.tsx` - NEW: State management
-6. `app/dashboard/page.tsx` - Remove bypass, add logging
-7. `app/onboarding/page.tsx` - Add logging, improve flow
-8. `app/api/user/profile/route.ts` - Enhanced logging
-9. `app/api/onboarding/complete/route.ts` - Enhanced logging
-10. `app/api/onboarding/personalize/route.ts` - Enhanced logging
+### 2.5 Layer 5: API Endpoint Testing
 
-## Expected Outcome
+**Test Script:** `scripts/test-layer5-api.ps1` (new)
 
-- No more emergency bypass activation
-- Clear visibility into entire flow via debug panel
-- Resilient error handling with graceful degradation
-- Optimistic UI updates for better UX
-- Production-ready logging for debugging
-- Onboarding completes successfully every time
+- Test `/api/health` endpoint
+- Test `/api/onboarding/complete` (POST)
+- Test `/api/user/profile` (GET)
+- Test `/api/battles` (GET)
+- Test `/api/forum/threads` (GET)
+- Verify authentication required for protected endpoints
+- Test rate limiting (if applicable)
+
+### 2.6 Layer 6: Runtime Error Monitoring
+
+**Script:** `scripts/test-layer6-runtime.ps1` (new)
+
+- Monitor terminal for errors during dev server startup
+- Check browser console for client-side errors
+- Verify no infinite loops in `useEffect` hooks
+- Check for React hydration errors
+- Monitor network requests for 401/403/500 errors
+- Verify Clerk webhook handler works (`/api/webhooks/clerk`)
+
+### 2.7 Layer 7: Integration Flow Testing
+
+**End-to-End Scenarios:**
+
+1. **New User Journey**
+
+- Landing page → Signup → Onboarding → Dashboard
+- Verify data persists between steps
+- No redirect loops
+
+2. **Returning User Journey**
+
+- Sign-in → Dashboard (if onboarding complete)
+- Sign-in → Onboarding (if onboarding incomplete)
+
+3. **Session Persistence**
+
+- Refresh page → stays on current route
+- Close tab → reopen → session persists (if Clerk configured)
+
+## Phase 3: Diagnostic Tools
+
+### 3.1 Create Diagnostic Script
+
+**File:** `scripts/diagnose-auth-flow.ps1` (new)
+
+- Check Clerk configuration (keys present)
+- Check Supabase configuration (keys present)
+- Test Clerk API connectivity
+- Test Supabase API connectivity
+- Verify middleware is active
+- Check for common errors in logs
+
+### 3.2 Add Debug Mode
+
+**File:** `lib/config.ts` or `lib/utils.ts`
+
+- Add `DEBUG_AUTH_FLOW` environment variable
+- Log all redirects and auth checks
+- Show auth state in UI (dev mode only)
+
+## Phase 4: Error Handling & Edge Cases
+
+### 4.1 Handle Clerk Errors
+
+- Network failures during signup
+- Invalid Clerk keys
+- Clerk service downtime
+
+### 4.2 Handle Database Errors
+
+- Supabase connection failures
+- User profile fetch failures
+- Onboarding completion failures
+
+### 4.3 Handle Edge Cases
+
+- User signs up but webhook fails
+- User completes onboarding but profile update fails
+- Multiple tabs open simultaneously
+
+## Implementation Order
+
+1. **Fix Signup Redirect (Phase 1.1-1.2)** - Highest priority
+2. **Add Landing Page Auth Check (Phase 1.2)** - Prevents loop
+3. **Enhance Middleware (Phase 1.3)** - Server-side safety net
+4. **Create Testing Scripts (Phase 2)** - Validate fixes
+5. **Run Layer-by-Layer Tests (Phase 2.1-2.7)** - Comprehensive validation
+6. **Add Diagnostic Tools (Phase 3)** - Future debugging
+7. **Handle Edge Cases (Phase 4)** - Production readiness
+
+## Testing Checklist
+
+- [ ] Landing page redirects authenticated users
+- [ ] Signup redirects to `/onboarding` after completion
+- [ ] Onboarding page accessible only to authenticated users
+- [ ] Dashboard redirects incomplete onboarding users
+- [ ] Middleware protects routes correctly
+- [ ] No redirect loops in any flow
+- [ ] Terminal shows no errors
+- [ ] Browser console shows no errors
+- [ ] All API endpoints respond correctly
+- [ ] User profile loads correctly
+- [ ] Mock mode works for development
+
+## Files to Modify
+
+1. `app/sign-up/[[...sign-up]]/page.tsx` - Add redirect URLs
+2. `app/page.tsx` - Add auth check and redirect logic
+3. `middleware.ts` - Enhance redirect logic for authenticated users
+4. `lib/auth-utils.ts` - Verify onboarding check function
+5. `scripts/test-layer1-terminal.ps1` - New testing script
+6. `scripts/test-layer5-api.ps1` - New API testing script
+7. `scripts/test-layer6-runtime.ps1` - New runtime monitoring script
+8. `scripts/diagnose-auth-flow.ps1` - New diagnostic script
 
 ### To-dos
 
-- [ ] Pull latest repository changes and verify codebase state
-- [ ] Map complete authentication and onboarding flow across all files
-- [ ] Create temporary /api/debug/user-state endpoint for diagnostics
-- [ ] Test complete sign-up and onboarding flow locally with detailed logging
-- [ ] Analyze console logs and identify exact failure point
-- [ ] Implement specific fix for identified root cause
-- [ ] Test the fix locally and verify no existing features break
-- [ ] Remove temporary debug endpoint and console logs
+- [ ] Configure Clerk SignUp component with afterSignUpUrl and fallbackRedirectUrl in app/sign-up/[[...sign-up]]/page.tsx
+- [ ] Add authentication check to landing page (app/page.tsx) to redirect authenticated users to /onboarding or /dashboard
+- [ ] Enhance middleware.ts to redirect authenticated users away from public routes based on onboarding status
+- [ ] Verify and fix hasCompletedOnboarding() function in lib/auth-utils.ts
+- [ ] Create scripts/test-layer1-terminal.ps1 for terminal and build validation
+- [ ] Create scripts/test-layer5-api.ps1 for API endpoint testing
+- [ ] Create scripts/test-layer6-runtime.ps1 for runtime error monitoring
+- [ ] Create scripts/diagnose-auth-flow.ps1 for comprehensive auth flow diagnostics
+- [ ] Test complete authentication flow: landing → signup → onboarding → dashboard
+- [ ] Test all protected routes require authentication and redirect correctly
+- [ ] Test complete onboarding flow from start to dashboard redirect
+- [ ] Validate no redirect loops occur in any user journey scenario

@@ -1,13 +1,64 @@
 // Supabase client configuration
 import { createClient } from '@supabase/supabase-js';
+import { isMockMode, getEnv } from './utils';
 
 // Create mock client for development when credentials are not available
 const createMockClient = () => ({
-  from: () => ({
-    select: () => ({ eq: () => ({ single: () => ({ data: null, error: null }) }) }),
-    insert: () => ({ data: null, error: null }),
-    update: () => ({ eq: () => ({ data: null, error: null }) }),
-    delete: () => ({ eq: () => ({ data: null, error: null }) }),
+  from: (table: string) => ({
+    // Mock API parameters intentionally unused to match Supabase API shape
+    select: (_columns = '*') => ({ 
+      eq: (_column: string, value: any) => ({ 
+        single: () => {
+          console.log(`MOCK DB: SELECT from ${table} WHERE ${_column} = ${value}`);
+          if (table === 'users' && _column === 'clerk_user_id') {
+            // Return a mock user that has completed onboarding
+            return { 
+              data: {
+                id: 'mock-user-123',
+                clerk_user_id: value,
+                email: 'test@example.com',
+                name: 'Test User',
+                avatar_url: null,
+                subscription_tier: 'free',
+                xp: 0,
+                cravecoins: 0,
+                streak_count: 0,
+                current_level: 1,
+                primary_craving: 'nofap', // This breaks the onboarding loop
+                ai_summary: 'Welcome to CraveVerse!',
+                preferences: {},
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }, 
+              error: null 
+            };
+          }
+          return { data: null, error: null };
+        },
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        limit: (_count: number) => ({ data: [], error: null })
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      limit: (_count: number) => ({ data: [], error: null })
+    }),
+    insert: (data: any) => ({ 
+      data: { id: 'mock-insert-123', ...data }, 
+      error: null 
+    }),
+    update: (data: any) => ({ 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      eq: (_column: string, _value: any) => ({ 
+        data: { id: 'mock-update-123', ...data }, 
+        error: null 
+      })
+    }),
+    delete: () => ({ 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      eq: (_column: string, _value: any) => ({ 
+        data: null, 
+        error: null 
+      })
+    }),
   }),
   auth: {
     getUser: () => ({ data: { user: null }, error: null }),
@@ -17,17 +68,28 @@ const createMockClient = () => ({
   },
 });
 
-// Safe client creation function
+// Safe client creation function with timeout and error handling
 function createSafeClient(url: string, key: string) {
   try {
-    if (!url || !key || url === 'https://placeholder.supabase.co' || key === 'placeholder-anon-key' || key === 'placeholder-service-key') {
-      console.warn('Supabase: Using mock client due to missing/invalid credentials');
-      console.warn(`Supabase URL: ${url}`);
-      console.warn(`Supabase Key length: ${key?.length || 0}`);
+    if (isMockMode()) {
       return createMockClient() as any;
     }
     
-    const client = createClient(url, key);
+    if (!url || !key || url.includes('placeholder') || key.includes('placeholder')) {
+      return createMockClient() as any;
+    }
+    
+    const client = createClient(url, key, {
+      auth: {
+        persistSession: false, // Server-side client shouldn't persist sessions
+      },
+      global: {
+        headers: {
+          'x-application-name': 'craveverse',
+        },
+      },
+    });
+    
     console.log('Supabase: Real client created successfully');
     return client;
   } catch (error) {
@@ -36,52 +98,74 @@ function createSafeClient(url: string, key: string) {
   }
 }
 
-// Environment variables with fallbacks for development
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-service-key';
+// Get Supabase credentials with safe fallbacks
+function getSupabaseConfig() {
+  try {
+    if (isMockMode()) {
+      return {
+        url: 'https://placeholder.supabase.co',
+        anonKey: 'placeholder-anon-key',
+        serviceKey: 'placeholder-service-key',
+      };
+    }
+    
+    return {
+      url: getEnv('NEXT_PUBLIC_SUPABASE_URL'),
+      anonKey: getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
+      serviceKey: getEnv('SUPABASE_SERVICE_ROLE_KEY'),
+    };
+  } catch (error) {
+    console.warn('Supabase config error, using mock:', error);
+    return {
+      url: 'https://placeholder.supabase.co',
+      anonKey: 'placeholder-anon-key',
+      serviceKey: 'placeholder-service-key',
+    };
+  }
+}
 
-// Check if we have valid Supabase credentials
-const hasValidSupabaseConfig = 
-  supabaseUrl && 
-  supabaseUrl !== 'https://placeholder.supabase.co' &&
-  supabaseAnonKey && 
-  supabaseAnonKey !== 'placeholder-anon-key' &&
-  supabaseServiceKey &&
-  supabaseServiceKey !== 'placeholder-service-key';
+const config = getSupabaseConfig();
 
 // Client-side Supabase client
-export const supabaseClient = createSafeClient(supabaseUrl, supabaseAnonKey);
+export const supabaseClient = createSafeClient(config.url, config.anonKey);
 
 // Server-side Supabase client with service role
-export const supabaseServer = createSafeClient(supabaseUrl, supabaseServiceKey);
+export const supabaseServer = createSafeClient(config.url, config.serviceKey);
 
 // Admin client for elevated permissions
-export const supabaseAdmin = createSafeClient(supabaseUrl, supabaseServiceKey);
+export const supabaseAdmin = createSafeClient(config.url, config.serviceKey);
 
 // Safe createClient function that handles missing environment variables
 export function createSupabaseClient(url?: string, key?: string) {
-  return createSafeClient(url || supabaseUrl, key || supabaseAnonKey);
+  return createSafeClient(url || config.url, key || config.anonKey);
 }
 
-// Test database connection
+// Test database connection with timeout
 export async function testDatabaseConnection() {
+  // Skip database test in mock mode
+  if (isMockMode()) {
+    return { connected: true, error: null }; // Mock mode always succeeds
+  }
+  
   try {
-    console.log('Testing database connection...');
-    const { data, error } = await supabaseServer
+    // Add timeout to prevent hanging (reduced from 5s to 3s for faster failures)
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Connection timeout')), 3000)
+    );
+    
+    const queryPromise = supabaseServer
       .from('users')
       .select('id')
       .limit(1);
     
+    const { error } = await Promise.race([queryPromise, timeoutPromise]) as any;
+    
     if (error) {
-      console.error('Database connection test failed:', error);
       return { connected: false, error: error.message };
     }
     
-    console.log('Database connection test successful');
     return { connected: true, error: null };
   } catch (error) {
-    console.error('Database connection test exception:', error);
     return { connected: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }

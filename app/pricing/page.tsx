@@ -12,30 +12,9 @@ export default function PricingPage() {
   const [isLoading, setIsLoading] = useState<string | null>(null);
 
   const handleSubscribe = async (tierId: string) => {
-    setIsLoading(tierId);
-    
-    try {
-      const response = await fetch('/api/stripe/create-checkout-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          priceId: tierId,
-        }),
-      });
-
-      if (response.ok) {
-        const { url } = await response.json();
-        window.location.href = url;
-      } else {
-        throw new Error('Failed to create checkout session');
-      }
-    } catch (error) {
-      console.error('Error creating checkout session:', error);
-    } finally {
+    // Stripe disabled - all features are free
+    alert('All features are currently free! No payment required. Enjoy your journey! 🎉');
       setIsLoading(null);
-    }
   };
 
   const getTierIcon = (tierId: string) => {

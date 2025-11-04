@@ -2,19 +2,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-client';
-import { getCurrentUserProfile } from '../../../../lib/auth-utils';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('admin-metrics', traceId);
+
   try {
+    if (isMockMode()) {
+      logger.info('Mock mode: returning mock admin metrics');
+      return NextResponse.json({ metrics: { totalUsers: 0, activeUsers: 0, totalRevenue: 0, monthlyRevenue: 0, aiCosts: 0, aiCostPerUser: 0, conversionRate: 0, churnRate: 0, topFeatures: [], userTiers: [], recentActivity: [] }, mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
+
     const { userId } = await auth();
     
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile || userProfile.plan_id !== 'admin') {
+    // Ensure user is admin
+    const { data: adminUser, error: adminError } = await supabaseServer
+      .from('users')
+      .select('plan_id')
+      .eq('clerk_user_id', userId)
+      .single();
+
+    if (adminError || !adminUser || adminUser.plan_id !== 'admin') {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
@@ -48,7 +64,7 @@ export async function GET(request: NextRequest) {
       .select('*', { count: 'exact', head: true });
 
     if (totalUsersError) {
-      console.error('Error fetching total users:', totalUsersError);
+      logger.error('Error fetching total users', { error: totalUsersError.message });
       return NextResponse.json(
         { error: 'Failed to fetch user metrics' },
         { status: 500 }
@@ -62,7 +78,7 @@ export async function GET(request: NextRequest) {
       .gte('last_sign_in_at', startDate.toISOString());
 
     if (activeUsersError) {
-      console.error('Error fetching active users:', activeUsersError);
+      logger.error('Error fetching active users', { error: activeUsersError.message });
       return NextResponse.json(
         { error: 'Failed to fetch active user metrics' },
         { status: 500 }
@@ -77,7 +93,7 @@ export async function GET(request: NextRequest) {
       .eq('type', 'subscription');
 
     if (revenueError) {
-      console.error('Error fetching revenue data:', revenueError);
+      logger.error('Error fetching revenue data', { error: revenueError.message });
       return NextResponse.json(
         { error: 'Failed to fetch revenue metrics' },
         { status: 500 }
@@ -96,7 +112,7 @@ export async function GET(request: NextRequest) {
       .gte('created_at', startDate.toISOString());
 
     if (aiUsageError) {
-      console.error('Error fetching AI usage data:', aiUsageError);
+      logger.error('Error fetching AI usage data', { error: aiUsageError.message });
       return NextResponse.json(
         { error: 'Failed to fetch AI cost metrics' },
         { status: 500 }
@@ -113,7 +129,7 @@ export async function GET(request: NextRequest) {
       .not('plan_id', 'is', null);
 
     if (userTiersError) {
-      console.error('Error fetching user tiers:', userTiersError);
+      logger.error('Error fetching user tiers', { error: userTiersError.message });
       return NextResponse.json(
         { error: 'Failed to fetch user tier metrics' },
         { status: 500 }
@@ -139,7 +155,7 @@ export async function GET(request: NextRequest) {
       .gte('created_at', startDate.toISOString());
 
     if (topFeaturesError) {
-      console.error('Error fetching top features:', topFeaturesError);
+      logger.error('Error fetching top features', { error: topFeaturesError.message });
       return NextResponse.json(
         { error: 'Failed to fetch feature metrics' },
         { status: 500 }
@@ -166,7 +182,7 @@ export async function GET(request: NextRequest) {
       .limit(10);
 
     if (recentActivityError) {
-      console.error('Error fetching recent activity:', recentActivityError);
+      logger.error('Error fetching recent activity', { error: recentActivityError.message });
       return NextResponse.json(
         { error: 'Failed to fetch activity metrics' },
         { status: 500 }
@@ -179,9 +195,9 @@ export async function GET(request: NextRequest) {
       timestamp: new Date(activity.created_at).toLocaleDateString(),
     })) || [];
 
-    // Calculate conversion and churn rates (simplified)
-    const conversionRate = 0.12; // Placeholder - would need more complex calculation
-    const churnRate = 0.05; // Placeholder - would need more complex calculation
+    // Calculate conversion and churn rates (placeholder)
+    const conversionRate = 0.12;
+    const churnRate = 0.05;
 
     const metrics = {
       totalUsers: totalUsers || 0,
@@ -197,9 +213,9 @@ export async function GET(request: NextRequest) {
       recentActivity,
     };
 
-    return NextResponse.json({ metrics });
+    return NextResponse.json({ metrics, mockUsed: false }, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
-    console.error('Admin metrics error:', error);
+    logger.error('Admin metrics error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

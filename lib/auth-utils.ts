@@ -44,15 +44,11 @@ export async function getCurrentUserProfile(): Promise<UserProfile | null> {
       .single();
 
     if (error) {
-      logger.error('Error fetching user profile', { error: error.message, code: error.code });
+      logger.error('Error fetching user profile', { error: error.message, clerk_user_id: userId });
       return null;
     }
 
-    logger.info('User profile found', { 
-      user_id: data.id, 
-      primary_craving: data.primary_craving,
-      subscription_tier: data.subscription_tier 
-    });
+    logger.debug('User profile found', { clerk_user_id: userId, primary_craving: data.primary_craving });
     return data;
   } catch (error) {
     logger.error('Exception in getCurrentUserProfile', { error: error instanceof Error ? error.message : 'Unknown error' });
@@ -92,6 +88,19 @@ export async function updateUserProfile(
   try {
     logger.info('Updating user profile', { user_id: userId, updates });
 
+    // Check if we're in mock mode
+    const isMockMode = !process.env.NEXT_PUBLIC_SUPABASE_URL || 
+                       process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://placeholder.supabase.co' ||
+                       process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://your-project.supabase.co' ||
+                       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY === 'placeholder-anon-key' ||
+                       process.env.SUPABASE_SERVICE_ROLE_KEY === 'placeholder-service-key';
+    
+    if (isMockMode) {
+      logger.info('Mock mode: Simulating user profile update', { user_id: userId, updates });
+      // In mock mode, just return success
+      return true;
+    }
+
     const { error } = await supabaseServer
       .from('users')
       .update(updates)
@@ -110,31 +119,44 @@ export async function updateUserProfile(
   }
 }
 
-// Check if user has completed onboarding
-export async function hasCompletedOnboarding(userId: string): Promise<boolean> {
+// Check if user has completed onboarding by clerk_user_id
+export async function hasCompletedOnboarding(clerkUserId: string): Promise<boolean> {
   try {
-    logger.debug('Checking onboarding status', { user_id: userId });
-    
-    const { data, error } = await supabaseServer
-      .from('users')
-      .select('primary_craving')
-      .eq('id', userId)
-      .single();
+    logger.debug('Checking onboarding status', { clerk_user_id: clerkUserId });
 
-    if (error) {
-      logger.error('Error checking onboarding status', { error: error.message, user_id: userId });
+    // Check if we're in mock mode
+    const isMockMode = !process.env.NEXT_PUBLIC_SUPABASE_URL || 
+                       process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://placeholder.supabase.co' ||
+                       process.env.NEXT_PUBLIC_SUPABASE_URL === 'https://your-project.supabase.co' ||
+                       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY === 'placeholder-anon-key' ||
+                       process.env.SUPABASE_SERVICE_ROLE_KEY === 'placeholder-service-key';
+    
+    if (isMockMode) {
+      logger.debug('Mock mode: Returning false for onboarding check');
       return false;
     }
 
-    const hasCompleted = !!data.primary_craving;
-    logger.info('Onboarding status checked', { 
-      user_id: userId, 
-      hasCompleted, 
-      primary_craving: data.primary_craving 
-    });
-    return hasCompleted;
+    const { data, error } = await supabaseServer
+      .from('users')
+      .select('primary_craving')
+      .eq('clerk_user_id', clerkUserId)
+      .single();
+
+    if (error) {
+      // User doesn't exist yet or error - consider onboarding incomplete
+      if (error.code === 'PGRST116') {
+        logger.debug('User not found in database - onboarding incomplete', { clerk_user_id: clerkUserId });
+        return false;
+      }
+      logger.error('Error checking onboarding status', { error: error.message, clerk_user_id: clerkUserId });
+      return false;
+    }
+
+    const isComplete = data.primary_craving !== null && data.primary_craving !== undefined;
+    logger.debug('Onboarding status checked', { clerk_user_id: clerkUserId, isComplete, primary_craving: data.primary_craving });
+    return isComplete;
   } catch (error) {
-    logger.error('Exception in hasCompletedOnboarding', { error: error instanceof Error ? error.message : 'Unknown error', user_id: userId });
+    logger.error('Exception in hasCompletedOnboarding', { error: error instanceof Error ? error.message : 'Unknown error', clerk_user_id: clerkUserId });
     return false;
   }
 }
@@ -213,7 +235,7 @@ export async function getRemainingAICalls(userId: string): Promise<number> {
     }
 
     // FIXED: Added type annotation for sum parameter
-    const totalTokens = data.reduce((sum: number, record) => sum + record.tokens_used, 0);
+    const totalTokens = data.reduce((sum: number, record: any) => sum + record.tokens_used, 0);
     
     // Calculate remaining calls based on tier
     const limits = {

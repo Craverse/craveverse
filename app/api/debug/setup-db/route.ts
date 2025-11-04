@@ -2,10 +2,22 @@
 // DELETE THIS FILE after setup is complete
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase-client';
+import { createLogger, createTraceId } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST() {
+export async function POST(request: Request) {
+  const traceId = createTraceId();
+  const logger = createLogger('debug-setup-db', traceId);
+
+  // Guard in production unless admin token provided
+  if (process.env.NODE_ENV === 'production') {
+    const token = request.headers.get('x-admin-token');
+    if (!token || token !== process.env.ADMIN_TOKEN) {
+      logger.warn('Unauthorized access to debug setup-db endpoint');
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+  }
   const setupResults = {
     timestamp: new Date().toISOString(),
     operations: {} as any,
@@ -15,7 +27,7 @@ export async function POST() {
 
   try {
     // Test if we can connect to the database first
-    const { data: testData, error: testError } = await supabaseServer
+    const { error: testError } = await supabaseServer
       .from('information_schema.tables')
       .select('table_name')
       .eq('table_schema', 'public')
@@ -27,7 +39,7 @@ export async function POST() {
         error: testError.message
       };
       setupResults.errors.push(`Connection test: ${testError.message}`);
-      return NextResponse.json(setupResults);
+      return NextResponse.json(setupResults, { headers: { 'x-trace-id': traceId } });
     }
 
     setupResults.operations.connection_test = {
@@ -57,12 +69,13 @@ export async function POST() {
 
     setupResults.success = setupResults.errors.length === 0;
 
-    return NextResponse.json(setupResults);
+    return NextResponse.json(setupResults, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
+    logger.error('Database setup failed', { error });
     return NextResponse.json({
       timestamp: new Date().toISOString(),
       error: 'Database setup failed',
       details: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
+    }, { status: 500, headers: { 'x-trace-id': traceId } });
   }
 }

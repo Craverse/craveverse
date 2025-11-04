@@ -2,13 +2,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-client';
-import { getCurrentUserProfile } from '../../../../lib/auth-utils';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('forum-threads-list', traceId);
+
   try {
     const { searchParams } = new URL(request.url);
     const craving = searchParams.get('craving') || 'all';
     const sort = searchParams.get('sort') || 'recent';
+
+    if (isMockMode()) {
+      logger.info('Mock mode: returning mock threads');
+      return NextResponse.json({ threads: [] , mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
 
     let query = supabaseServer
       .from('forum_posts')
@@ -53,7 +64,7 @@ export async function GET(request: NextRequest) {
     const { data: threads, error } = await query;
 
     if (error) {
-      console.error('Error fetching threads:', error);
+      logger.error('Error fetching threads', { error: error.message });
       return NextResponse.json(
         { error: 'Failed to fetch threads' },
         { status: 500 }
@@ -74,9 +85,9 @@ export async function GET(request: NextRequest) {
       created_at: thread.created_at,
     })) || [];
 
-    return NextResponse.json({ threads: transformedThreads });
+    return NextResponse.json({ threads: transformedThreads, mockUsed: false }, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
-    console.error('Forum threads error:', error);
+    logger.error('Forum threads error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -85,7 +96,19 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('forum-thread-create', traceId);
+
   try {
+    if (isMockMode()) {
+      const { title, content, craving_type } = await request.json();
+      if (!title || !content || !craving_type) {
+        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      }
+      logger.info('Mock mode: returning mock thread creation');
+      return NextResponse.json({ success: true, thread: { id: 'mock-thread', title, content, craving_type }, mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
+
     const { userId } = await auth();
     
     if (!userId) {
@@ -101,9 +124,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user profile
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile) {
+    const { data: userProfile, error: userError } = await supabaseServer
+      .from('users')
+      .select('*')
+      .eq('clerk_user_id', userId)
+      .single();
+
+    if (userError || !userProfile) {
+      logger.warn('User not found for thread creation', { userId, error: userError?.message });
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -115,7 +143,7 @@ export async function POST(request: NextRequest) {
       .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
 
     if (recentError) {
-      console.error('Error checking recent posts:', recentError);
+      logger.warn('Error checking recent posts', { error: recentError.message });
     }
 
     const dailyLimit = userProfile.subscription_tier === 'free' ? 1 : 10;
@@ -153,7 +181,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (threadError) {
-      console.error('Error creating thread:', threadError);
+      logger.error('Error creating thread', { error: threadError.message });
       return NextResponse.json(
         { error: 'Failed to create thread' },
         { status: 500 }
@@ -175,7 +203,7 @@ export async function POST(request: NextRequest) {
           },
         });
     } catch (logError) {
-      console.error('Error logging activity:', logError);
+      logger.warn('Error logging activity', { error: logError });
     }
 
     return NextResponse.json({
@@ -192,9 +220,10 @@ export async function POST(request: NextRequest) {
         reply_count: 0,
         created_at: thread.created_at,
       },
-    });
+      mockUsed: false,
+    }, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
-    console.error('Create thread error:', error);
+    logger.error('Create thread error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

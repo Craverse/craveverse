@@ -1,14 +1,22 @@
 // API route for individual thread details
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-client';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
 
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ threadId: string }> }
 ) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('forum-thread-detail', traceId);
   try {
+    if (isMockMode()) {
+      const { threadId } = await params;
+      logger.info('Mock mode: returning mock thread detail');
+      return NextResponse.json({ thread: { id: threadId, title: 'Mock Thread', content: 'Mock content', upvotes: 0, created_at: new Date().toISOString() }, replies: [], mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
     const { threadId } = await params;
 
     // Get thread details
@@ -56,7 +64,7 @@ export async function GET(
       .order('created_at', { ascending: true });
 
     if (repliesError) {
-      console.error('Error fetching replies:', repliesError);
+      logger.error('Error fetching replies', { error: repliesError.message });
       return NextResponse.json(
         { error: 'Failed to fetch replies' },
         { status: 500 }
@@ -92,9 +100,10 @@ export async function GET(
     return NextResponse.json({
       thread: transformedThread,
       replies: transformedReplies,
-    });
+      mockUsed: false,
+    }, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
-    console.error('Thread details error:', error);
+    logger.error('Thread details error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

@@ -74,6 +74,15 @@ export function PersonalizationResults({
           <p className="text-lg font-medium text-crave-orange">
             {personalization.introMessage}
           </p>
+          {/* AI PLACEHOLDER: Personalization preview - AI integration coming in Stage 2 */}
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+            <div className="text-center">
+              <div className="text-4xl font-bold text-gray-400 mb-2">API</div>
+              <div className="text-sm text-gray-500" title="AI integration coming in Stage 2">
+                AI-powered personalization preview
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

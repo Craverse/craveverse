@@ -2,10 +2,22 @@
 // DELETE THIS FILE after diagnosis
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase-client';
+import { createLogger, createTraceId } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const traceId = createTraceId();
+  const logger = createLogger('debug-db-schema', traceId);
+  
+  // Guard in production unless admin token provided
+  if (process.env.NODE_ENV === 'production') {
+    const token = request.headers.get('x-admin-token');
+    if (!token || token !== process.env.ADMIN_TOKEN) {
+      logger.warn('Unauthorized access to debug db-schema endpoint');
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+  }
   const schemaCheck = {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'unknown',
@@ -116,8 +128,8 @@ export async function GET() {
 
     // Determine diagnosis
     const missingTables = Object.entries(schemaCheck.tables)
-      .filter(([_, table]: [string, any]) => !table.exists)
-      .map(([name, _]) => name);
+      .filter(([, table]: [string, any]) => !table.exists)
+      .map(([name]) => name);
 
     if (missingTables.length === 0) {
       schemaCheck.diagnosis = 'All required tables exist';
@@ -127,12 +139,13 @@ export async function GET() {
       schemaCheck.diagnosis = `WARNING: Missing tables: ${missingTables.join(', ')}`;
     }
 
-    return NextResponse.json(schemaCheck);
+    return NextResponse.json(schemaCheck, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
+    logger.error('Schema check failed', { error });
     return NextResponse.json({
       timestamp: new Date().toISOString(),
       error: 'Schema check failed',
       details: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
+    }, { status: 500, headers: { 'x-trace-id': traceId } });
   }
 }

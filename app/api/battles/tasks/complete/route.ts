@@ -2,11 +2,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-client';
-import { getCurrentUserProfile } from '../../../../../lib/auth-utils';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
 
 
 export async function POST(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('battle-task-complete', traceId);
   try {
+    if (isMockMode()) {
+      const { battleId, taskId } = await request.json();
+      if (!battleId || !taskId) {
+        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      }
+      return NextResponse.json({ success: true, message: 'Task completed (mock)', xp_reward: 10, coin_reward: 5, mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
     const { userId } = await auth();
     
     if (!userId) {
@@ -22,8 +32,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile) {
+    const { data: userProfile, error: userError } = await supabaseServer
+      .from('users')
+      .select('*')
+      .eq('clerk_user_id', userId)
+      .single();
+
+    if (userError || !userProfile) {
+      logger.warn('User not found for completing battle task', { userId, error: userError?.message });
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -77,7 +93,7 @@ export async function POST(request: NextRequest) {
       .eq('id', taskId);
 
     if (updateTaskError) {
-      console.error('Error updating task:', updateTaskError);
+      logger.error('Error updating task', { error: updateTaskError.message });
       return NextResponse.json(
         { error: 'Failed to complete task' },
         { status: 500 }
@@ -103,7 +119,7 @@ export async function POST(request: NextRequest) {
       .eq('id', battleId);
 
     if (updateBattleError) {
-      console.error('Error updating battle progress:', updateBattleError);
+      logger.error('Error updating battle progress', { error: updateBattleError.message });
       return NextResponse.json(
         { error: 'Failed to update battle progress' },
         { status: 500 }
@@ -121,7 +137,7 @@ export async function POST(request: NextRequest) {
       .eq('id', userProfile.id);
 
     if (updateUserError) {
-      console.error('Error updating user rewards:', updateUserError);
+      logger.error('Error updating user rewards', { error: updateUserError.message });
       return NextResponse.json(
         { error: 'Failed to award rewards' },
         { status: 500 }
@@ -136,7 +152,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (updatedBattleError) {
-      console.error('Error fetching updated battle:', updatedBattleError);
+      logger.error('Error fetching updated battle', { error: updatedBattleError.message });
     } else if (updatedBattle) {
       // If both players have completed all tasks, determine winner
       if (updatedBattle.user1_tasks_completed >= 3 && updatedBattle.user2_tasks_completed >= 3) {
@@ -149,7 +165,7 @@ export async function POST(request: NextRequest) {
           .eq('id', battleId);
 
         if (completeBattleError) {
-          console.error('Error completing battle:', completeBattleError);
+          logger.warn('Error completing battle', { error: completeBattleError.message });
         }
       }
     }
@@ -170,7 +186,7 @@ export async function POST(request: NextRequest) {
           },
         });
     } catch (logError) {
-      console.error('Error logging activity:', logError);
+      logger.warn('Error logging activity', { error: logError });
     }
 
     return NextResponse.json({
@@ -180,7 +196,7 @@ export async function POST(request: NextRequest) {
       coin_reward: task.coin_reward,
     });
   } catch (error) {
-    console.error('Complete battle task error:', error);
+    logger.error('Complete battle task error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

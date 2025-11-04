@@ -2,11 +2,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-client';
-import { getCurrentUserProfile } from '../../../../lib/auth-utils';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('trial-start', traceId);
+
   try {
+    if (isMockMode()) {
+      const { planId } = await request.json();
+      if (!planId || planId === 'free') {
+        return NextResponse.json({ error: 'Invalid plan for trial' }, { status: 400 });
+      }
+      logger.info('Mock mode: returning mock trial start');
+      return NextResponse.json({ success: true, message: 'Trial started successfully', trial_end: new Date(Date.now()+14*24*60*60*1000).toISOString(), plan_id: planId, mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
+
     const { userId } = await auth();
     
     if (!userId) {
@@ -22,8 +36,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile) {
+    const { data: userProfile, error: userError } = await supabaseServer
+      .from('users')
+      .select('*')
+      .eq('clerk_user_id', userId)
+      .single();
+
+    if (userError || !userProfile) {
+      logger.warn('User not found for trial start', { userId, error: userError?.message });
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -36,7 +56,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (subError && subError.code !== 'PGRST116') {
-      console.error('Error checking existing subscription:', subError);
+      logger.error('Error checking existing subscription', { error: subError.message });
       return NextResponse.json(
         { error: 'Failed to check subscription status' },
         { status: 500 }
@@ -59,7 +79,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (trialError && trialError.code !== 'PGRST116') {
-      console.error('Error checking trial history:', trialError);
+      logger.error('Error checking trial history', { error: trialError.message });
       return NextResponse.json(
         { error: 'Failed to check trial history' },
         { status: 500 }
@@ -93,7 +113,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (createError) {
-      console.error('Error creating trial subscription:', createError);
+      logger.error('Error creating trial subscription', { error: createError.message });
       return NextResponse.json(
         { error: 'Failed to start trial' },
         { status: 500 }
@@ -110,7 +130,7 @@ export async function POST(request: NextRequest) {
       .eq('id', userProfile.id);
 
     if (updateUserError) {
-      console.error('Error updating user plan:', updateUserError);
+      logger.error('Error updating user plan', { error: updateUserError.message });
       return NextResponse.json(
         { error: 'Failed to update user plan' },
         { status: 500 }
@@ -128,7 +148,7 @@ export async function POST(request: NextRequest) {
       });
 
     if (trialHistoryError) {
-      console.error('Error recording trial history:', trialHistoryError);
+      logger.warn('Error recording trial history', { error: trialHistoryError.message });
       // Don't fail the request for this
     }
 
@@ -147,7 +167,7 @@ export async function POST(request: NextRequest) {
           },
         });
     } catch (logError) {
-      console.error('Error logging activity:', logError);
+      logger.warn('Error logging activity', { error: logError });
     }
 
     return NextResponse.json({
@@ -155,9 +175,10 @@ export async function POST(request: NextRequest) {
       message: 'Trial started successfully',
       trial_end: trialEnd.toISOString(),
       plan_id: planId,
-    });
+      mockUsed: false,
+    }, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
-    console.error('Start trial error:', error);
+    logger.error('Start trial error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

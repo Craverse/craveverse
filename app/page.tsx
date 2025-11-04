@@ -1,8 +1,12 @@
 // Landing page
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useUser } from '@clerk/nextjs';
+import { useUserContext } from '@/contexts/user-context';
 import { Button } from '@/components/ui/button';
+import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { 
@@ -17,13 +21,34 @@ import {
   CheckCircle
 } from 'lucide-react';
 import Link from 'next/link';
-import { useUser } from '@clerk/nextjs';
+import { isMockMode } from '@/lib/utils';
 
 // Note: Lazy loading components can be implemented when needed
 
 export default function LandingPage() {
-  const { isSignedIn, user } = useUser();
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const mock = isMockMode();
+  const { user: clerkUser, isLoaded: clerkLoaded } = useUser();
+  const { userProfile, isLoading: profileLoading, isOnboardingComplete } = useUserContext();
+
+  // Redirect authenticated users away from landing page
+  useEffect(() => {
+    if (mock) return; // Skip in mock mode
+    
+    if (clerkLoaded && clerkUser) {
+      // User is authenticated - check onboarding status
+      if (!profileLoading) {
+        if (isOnboardingComplete) {
+          // Redirect to dashboard if onboarding complete
+          router.push('/dashboard');
+        } else {
+          // Redirect to onboarding if incomplete
+          router.push('/onboarding');
+        }
+      }
+    }
+  }, [clerkLoaded, clerkUser, profileLoading, isOnboardingComplete, mock, router]);
 
   const features = [
     {
@@ -86,17 +111,29 @@ export default function LandingPage() {
     },
   ];
 
-  const handleGetStarted = () => {
-    setIsLoading(true);
-    if (isSignedIn) {
-      window.location.href = '/dashboard';
-    } else {
+  const handleGetStarted = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    
+    try {
+      setIsLoading(true);
+      
+      // Set auth intent flag so Clerk loads on next navigation
+      if (typeof window !== 'undefined' && !mock) {
+        sessionStorage.setItem('authIntent', 'true');
+      }
+      
+      // Use window.location for immediate navigation
       window.location.href = '/sign-up';
+    } catch (error) {
+      // Fallback to router
+      setIsLoading(false);
+      router.push('/sign-up');
     }
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background" style={{ position: 'relative', zIndex: 1 }}>
       {/* Hero Section */}
       <section className="relative overflow-hidden">
         <div className="container mx-auto px-4 py-20">
@@ -120,10 +157,16 @@ export default function LandingPage() {
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button 
+                type="button"
                 size="lg" 
-                onClick={handleGetStarted}
+                onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleGetStarted(e);
+                }}
                 disabled={isLoading}
-                className="bg-crave-orange hover:bg-crave-orange-dark text-white px-8 py-4 text-lg"
+                className="bg-crave-orange hover:bg-crave-orange-dark text-white px-8 py-4 text-lg cursor-pointer"
+                style={{ pointerEvents: isLoading ? 'none' : 'auto' }}
               >
                 {isLoading ? (
                   <div className="flex items-center space-x-2">
@@ -141,7 +184,11 @@ export default function LandingPage() {
               <Button 
                 size="lg" 
                 variant="outline"
-                onClick={() => window.location.href = '/pricing'}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  window.location.href = '/pricing';
+                }}
                 className="px-8 py-4 text-lg"
               >
                 View Pricing
@@ -245,10 +292,16 @@ export default function LandingPage() {
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <Button 
+                  type="button"
                   size="lg" 
-                  onClick={handleGetStarted}
+                  onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleGetStarted(e);
+                  }}
                   disabled={isLoading}
-                  className="bg-crave-orange hover:bg-crave-orange-dark text-white px-8 py-4 text-lg"
+                  className="bg-crave-orange hover:bg-crave-orange-dark text-white px-8 py-4 text-lg cursor-pointer z-50 relative"
+                  style={{ pointerEvents: isLoading ? 'none' : 'auto' }}
                 >
                   {isLoading ? (
                     <div className="flex items-center space-x-2">
@@ -266,7 +319,11 @@ export default function LandingPage() {
                 <Button 
                   size="lg" 
                   variant="outline"
-                  onClick={() => window.location.href = '/pricing'}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.location.href = '/pricing';
+                  }}
                   className="px-8 py-4 text-lg"
                 >
                   View All Plans

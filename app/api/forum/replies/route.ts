@@ -2,12 +2,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '../../../../lib/supabase-client';
-import { getCurrentUserProfile } from '../../../../lib/auth-utils';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
 
 const supabase = supabaseServer;
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('forum-reply-create', traceId);
+
   try {
+    if (isMockMode()) {
+      const { threadId, content } = await request.json();
+      if (!threadId || !content) {
+        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      }
+      logger.info('Mock mode: returning mock reply');
+      return NextResponse.json({ success: true, reply: { id: 'mock-reply', content }, mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
+
     const { userId } = await auth();
     
     if (!userId) {
@@ -24,8 +39,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Get user profile
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile) {
+    const { data: userProfile, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('clerk_user_id', userId)
+      .single();
+
+    if (userError || !userProfile) {
+      logger.warn('User not found for creating reply', { userId, error: userError?.message });
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -52,7 +73,7 @@ export async function POST(request: NextRequest) {
       .gte('created_at', new Date(Date.now() - 60 * 60 * 1000).toISOString()); // Last hour
 
     if (recentError) {
-      console.error('Error checking recent replies:', recentError);
+      logger.warn('Error checking recent replies', { error: recentError.message });
     }
 
     const hourlyLimit = userProfile.subscription_tier === 'free' ? 5 : 20;
@@ -90,7 +111,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (replyError) {
-      console.error('Error creating reply:', replyError);
+      logger.error('Error creating reply', { error: replyError.message });
       return NextResponse.json(
         { error: 'Failed to create reply' },
         { status: 500 }
@@ -112,7 +133,7 @@ export async function POST(request: NextRequest) {
           },
         });
     } catch (logError) {
-      console.error('Error logging activity:', logError);
+      logger.warn('Error logging activity', { error: logError });
     }
 
     return NextResponse.json({
@@ -128,9 +149,10 @@ export async function POST(request: NextRequest) {
         ai_generated: reply.ai_generated,
         parent_reply_id: reply.parent_reply_id,
       },
-    });
+      mockUsed: false,
+    }, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
-    console.error('Create reply error:', error);
+    logger.error('Create reply error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

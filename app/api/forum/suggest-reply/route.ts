@@ -2,11 +2,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { createOpenAIClient } from '../../../../lib/openai-client';
-import { getCurrentUserProfile } from '../../../../lib/auth-utils';
 import { CacheManager } from '../../../../lib/cache';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('forum-suggest-reply', traceId);
+
   try {
+    if (isMockMode()) {
+      const { threadTitle, craving } = await request.json();
+      if (!threadTitle || !craving) {
+        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      }
+      logger.info('Mock mode: returning mock suggestion');
+      return NextResponse.json({ suggestion: 'Keep going—you are stronger than your cravings.' , mockUsed: true}, { headers: { 'x-trace-id': traceId } });
+    }
+
     const { userId } = await auth();
     
     if (!userId) {
@@ -22,54 +37,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user profile
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
+    // Fetch user preferences for personalization
+    const { supabaseServer } = await import('@/lib/supabase-client');
+    const { data: userProfile } = await supabaseServer
+      .from('users')
+      .select('preferences, subscription_tier')
+      .eq('clerk_user_id', userId)
+      .single();
 
-    // Check if user has remaining AI calls
-    const openai = createOpenAIClient(userId, userProfile.subscription_tier as 'free' | 'plus' | 'ultra');
+    // Create OpenAI client (rate limits handled internally)
+    const openai = createOpenAIClient(userId, (userProfile?.subscription_tier as 'free' | 'plus' | 'ultra') || 'free');
     
     if (!openai) {
-      console.warn('OpenAI client not available for forum reply suggestion');
+      logger.warn('OpenAI client not available for forum reply suggestion');
       return NextResponse.json(
         { error: 'AI features are currently unavailable' },
         { status: 503 }
       );
     }
     
-    const hasRemainingCalls = await openai.hasRemainingCalls();
-    
-    if (!hasRemainingCalls) {
-      return NextResponse.json(
-        { error: 'AI suggestion limit reached. Upgrade your plan for more suggestions.' },
-        { status: 429 }
-      );
-    }
-
-    // Check cache first
-    const cacheKey = `forum_suggestion:${threadTitle}:${craving}`;
+    // Check cache first (cache key includes persona for better caching)
+    const userPersona = userProfile?.preferences ? 
+      (await import('@/lib/openai-client')).derivePersonaFromPreferences(userProfile.preferences) : 'encouraging';
+    const cacheKey = `forum_suggestion:${threadTitle}:${craving}:${userPersona}`;
     const cachedSuggestion = await CacheManager.getForumTemplate(cacheKey);
     
     if (cachedSuggestion) {
-      return NextResponse.json({ suggestion: cachedSuggestion });
+      return NextResponse.json({ suggestion: cachedSuggestion, cached: true }, { headers: { 'x-trace-id': traceId } });
     }
 
-    // Generate AI suggestion
+    // Generate AI suggestion with user preferences
     try {
       const suggestion = await openai.generateForumReply(
         threadTitle,
         craving,
+        userProfile?.preferences, // Pass preferences for persona-based tone
         userContent
       );
 
       // Cache the suggestion
       await CacheManager.setForumTemplate(cacheKey, suggestion);
 
-      return NextResponse.json({ suggestion });
+      return NextResponse.json({ suggestion, mockUsed: false }, { headers: { 'x-trace-id': traceId } });
     } catch (error) {
-      console.error('AI suggestion generation failed:', error);
+      logger.error('AI suggestion generation failed', { error });
       
       // Return fallback suggestion
       const fallbackSuggestions = {
@@ -103,10 +114,10 @@ export async function POST(request: NextRequest) {
       const fallbackList = fallbackSuggestions[craving as keyof typeof fallbackSuggestions] || fallbackSuggestions.nofap;
       const randomFallback = fallbackList[Math.floor(Math.random() * fallbackList.length)];
 
-      return NextResponse.json({ suggestion: randomFallback });
+      return NextResponse.json({ suggestion: randomFallback, mockUsed: true }, { headers: { 'x-trace-id': traceId } });
     }
   } catch (error) {
-    console.error('Forum suggestion error:', error);
+    logger.error('Forum suggestion error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

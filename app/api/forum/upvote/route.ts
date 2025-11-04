@@ -2,11 +2,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-client';
-import { getCurrentUserProfile } from '../../../../lib/auth-utils';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
 
 
 export async function POST(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('forum-upvote', traceId);
   try {
+    if (isMockMode()) {
+      const { threadId } = await request.json();
+      if (!threadId) {
+        return NextResponse.json({ error: 'Missing thread ID' }, { status: 400 });
+      }
+      return NextResponse.json({ success: true, message: 'Thread upvoted (mock)', cost: 0, remainingCoins: 0, mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
     const { userId } = await auth();
     
     if (!userId) {
@@ -23,8 +33,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Get user profile
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile) {
+    const { data: userProfile, error: userError } = await supabaseServer
+      .from('users')
+      .select('*')
+      .eq('clerk_user_id', userId)
+      .single();
+
+    if (userError || !userProfile) {
+      logger.warn('User not found for upvote', { userId, error: userError?.message });
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -46,7 +62,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (upvoteCheckError && upvoteCheckError.code !== 'PGRST116') {
-      console.error('Error checking upvote:', upvoteCheckError);
+      logger.error('Error checking upvote', { error: upvoteCheckError.message });
       return NextResponse.json(
         { error: 'Failed to check upvote status' },
         { status: 500 }
@@ -70,7 +86,7 @@ export async function POST(request: NextRequest) {
       });
 
     if (upvoteError) {
-      console.error('Error creating upvote:', upvoteError);
+      logger.error('Error creating upvote', { error: upvoteError.message });
       return NextResponse.json(
         { error: 'Failed to create upvote' },
         { status: 500 }
@@ -92,7 +108,7 @@ export async function POST(request: NextRequest) {
       .eq('id', threadId);
 
     if (updateError) {
-      console.error('Error updating upvote count:', updateError);
+      logger.error('Error updating upvote count', { error: updateError.message });
       return NextResponse.json(
         { error: 'Failed to update upvote count' },
         { status: 500 }
@@ -109,7 +125,7 @@ export async function POST(request: NextRequest) {
       .eq('id', userProfile.id);
 
     if (coinError) {
-      console.error('Error deducting coins:', coinError);
+      logger.error('Error deducting coins', { error: coinError.message });
       return NextResponse.json(
         { error: 'Failed to deduct coins' },
         { status: 500 }
@@ -131,7 +147,7 @@ export async function POST(request: NextRequest) {
           },
         });
     } catch (logError) {
-      console.error('Error logging activity:', logError);
+      logger.warn('Error logging activity', { error: logError });
     }
 
     return NextResponse.json({
@@ -141,7 +157,7 @@ export async function POST(request: NextRequest) {
       remainingCoins: userProfile.cravecoins - upvoteCost,
     });
   } catch (error) {
-    console.error('Forum upvote error:', error);
+    logger.error('Forum upvote error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

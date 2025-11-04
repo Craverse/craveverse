@@ -1,5 +1,5 @@
 // Rate Limiter for API endpoints and AI calls
-import { cache, CacheManager } from './cache';
+import { cache } from './cache';
 import { CONFIG } from './config';
 
 interface RateLimitConfig {
@@ -27,7 +27,6 @@ export class RateLimiter {
   async checkLimit(identifier: string): Promise<RateLimitResult> {
     const key = `${this.config.keyPrefix}:${identifier}`;
     const now = Math.floor(Date.now() / 1000);
-    const windowStart = now - this.config.window;
 
     try {
       // Get current count from cache

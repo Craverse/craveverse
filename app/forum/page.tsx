@@ -5,6 +5,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
+import { AuthGuard } from '@/components/auth-guard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,7 @@ import {
 import { ThreadList } from '../../components/forum/thread-list';
 import { CreateThreadModal } from '../../components/forum/create-thread-modal';
 import { ForumFilters } from '../../components/forum/forum-filters';
+import { useLogger } from '@/lib/logger';
 
 interface ForumThread {
   id: string;
@@ -39,6 +41,7 @@ interface ForumThread {
 }
 
 export default function ForumPage() {
+  const logger = useLogger('ForumPage');
   const [threads, setThreads] = useState<ForumThread[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -59,7 +62,7 @@ export default function ForumPage() {
         setThreads(data.threads);
       }
     } catch (error) {
-      console.error('Error fetching threads:', error);
+      logger.error('Error fetching threads', { error: error instanceof Error ? error.message : 'Unknown error' });
     } finally {
       setIsLoading(false);
     }
@@ -86,8 +89,9 @@ export default function ForumPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-8">
+    <AuthGuard>
+      <div className="min-h-screen bg-background">
+        <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
@@ -195,6 +199,30 @@ export default function ForumPage() {
           </Card>
         </div>
 
+        {/* AI CraveBot Section */}
+        <Card className="border-crave-orange/20 bg-crave-orange/5">
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <MessageSquare className="h-5 w-5 text-crave-orange" />
+              <span>Ask CraveBot</span>
+            </CardTitle>
+            <CardDescription>
+              Get AI-powered advice and support for your journey
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {/* AI PLACEHOLDER: CraveBot replies - AI integration coming in Stage 2 */}
+            <div className="p-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+              <div className="text-center">
+                <div className="text-4xl font-bold text-gray-400 mb-2">API</div>
+                <div className="text-sm text-gray-500" title="AI integration coming in Stage 2">
+                  AI-powered CraveBot responses
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Thread List */}
         <div className="space-y-4">
           {isLoading ? (
@@ -234,5 +262,6 @@ export default function ForumPage() {
         />
       </div>
     </div>
+    </AuthGuard>
   );
 }

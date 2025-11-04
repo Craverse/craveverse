@@ -1,5 +1,5 @@
 // Feature gating system for subscription tiers
-import { CONFIG } from './config';
+// Feature gates configuration
 
 export interface FeatureGate {
   name: string;

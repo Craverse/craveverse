@@ -3,16 +3,59 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "CraveVerse - Conquer Your Cravings with our 30-day journey system",
+  "keywords": ["addiction recovery", "habit breaking", "self improvement", "craving control", "nextjs", "react"],
+  "author": "CraveVerse Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/craveverse.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/craveverse/issues"
+  },
+  "homepage": "https://craveverse.vercel.app",
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
   "scripts": {
     "dev": "next dev",
+    "dev:both": "npm run dev",
+    "dev:both:win": "npm run dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "lint:fix": "next lint --fix",
     "type-check": "tsc --noEmit",
+    "clean": "rm -rf .next node_modules package-lock.json",
+    "clean:win": "rmdir /s /q .next node_modules & del package-lock.json",
+    "fresh-install": "npm ci",
     "setup": "node scripts/setup.js",
     "setup:windows": "scripts\\setup.bat",
     "setup:unix": "./scripts/setup.sh",
-    "setup:powershell": "powershell -ExecutionPolicy Bypass -File scripts\\setup.ps1"
+    "setup:powershell": "powershell -ExecutionPolicy Bypass -File scripts\\setup.ps1",
+    "test:api": "echo 'API testing can be done with curl or Postman'",
+    "health-check": "curl -f http://localhost:3000/api/health || exit 1",
+    "prebuild": "npm run type-check",
+    "postbuild": "echo 'Build completed successfully'",
+    "dev:clean": "npm run clean:win && npm install && npm run dev",
+    "build:analyze": "ANALYZE=true npm run build",
+    "check:deps": "npm outdated",
+    "update:deps": "npm update",
+    "audit:fix": "npm audit fix"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.33.5",
@@ -75,7 +118,8 @@
     "tailwindcss": "^3.4.18",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
-    "zod": "^4.1.12"
+    "zod": "^4.1.12",
+    "uuid": "^10.0.0"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",
@@ -89,6 +133,7 @@
     "eslint-config-next": "^15.5.5",
     "eslint-plugin-react-refresh": "^0.4.24",
     "postcss": "^8.5.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@types/uuid": "^10.0.0"
   }
 }

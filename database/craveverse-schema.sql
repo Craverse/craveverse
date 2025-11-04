@@ -173,6 +173,43 @@ CREATE TABLE payment_transactions (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Shop items catalog
+CREATE TABLE shop_items (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('consumable','utility','cosmetic')),
+  price_coins INTEGER NOT NULL CHECK (price_coins >= 0),
+  description TEXT,
+  icon TEXT,
+  effects JSONB DEFAULT '{}', -- e.g. {"pause_days":1} or {"level_skip":1}
+  tier_required subscription_tier DEFAULT 'free',
+  active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- User purchases
+CREATE TABLE user_purchases (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  item_id UUID REFERENCES shop_items(id) ON DELETE RESTRICT,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  amount_coins INTEGER NOT NULL,
+  metadata JSONB DEFAULT '{}',
+  purchased_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Notification preferences
+CREATE TABLE notification_preferences (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  email_enabled BOOLEAN DEFAULT TRUE,
+  push_enabled BOOLEAN DEFAULT FALSE,
+  daily_reminder_time TIME,
+  preferences JSONB DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Queue jobs for batched AI processing
 CREATE TABLE queue_jobs (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -227,6 +264,11 @@ CREATE INDEX idx_ai_usage_metrics_created_at ON ai_usage_metrics(created_at);
 CREATE INDEX idx_queue_jobs_status ON queue_jobs(status);
 CREATE INDEX idx_queue_jobs_scheduled_at ON queue_jobs(scheduled_at);
 
+CREATE INDEX idx_shop_items_active ON shop_items(active);
+CREATE INDEX idx_user_purchases_user_id ON user_purchases(user_id);
+CREATE INDEX idx_user_purchases_item_id ON user_purchases(item_id);
+CREATE INDEX idx_notification_preferences_user_id ON notification_preferences(user_id);
+
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -246,6 +288,9 @@ CREATE TRIGGER update_forum_posts_updated_at BEFORE UPDATE ON forum_posts
 CREATE TRIGGER update_pause_tokens_updated_at BEFORE UPDATE ON pause_tokens
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER update_notification_preferences_updated_at BEFORE UPDATE ON notification_preferences
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_progress ENABLE ROW LEVEL SECURITY;
@@ -256,6 +301,9 @@ ALTER TABLE pause_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_usage_metrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shareable_progress ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shop_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_purchases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
 
 -- Create RLS policies for users
 CREATE POLICY "Users can view their own profile" ON users
@@ -327,6 +375,27 @@ CREATE POLICY "Users can insert their own shareable progress" ON shareable_progr
 -- Create RLS policies for payment_transactions
 CREATE POLICY "Users can view their own payment transactions" ON payment_transactions
     FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+-- RLS for shop_items (read-only public)
+CREATE POLICY "Anyone can view shop items" ON shop_items
+    FOR SELECT USING (active = TRUE);
+
+-- RLS for user_purchases
+CREATE POLICY "Users can view their purchases" ON user_purchases
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can insert their purchases" ON user_purchases
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+-- RLS for notification_preferences
+CREATE POLICY "Users can view their notification prefs" ON notification_preferences
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can upsert their notification prefs" ON notification_preferences
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can update their notification prefs" ON notification_preferences
+    FOR UPDATE USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
 
 -- Insert craving types
 INSERT INTO cravings (type, name, description, icon, color) VALUES

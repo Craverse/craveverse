@@ -2,19 +2,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-client';
-import { getCurrentUserProfile } from '../../../../lib/auth-utils';
+import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
+import { isMockMode } from '@/lib/utils';
 
 
 export async function GET(request: NextRequest) {
+  const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
+  const logger = createLogger('battles-stats', traceId);
   try {
+    if (isMockMode()) {
+      logger.info('Mock mode: returning mock battle stats');
+      return NextResponse.json({ stats: { totalBattles: 0, wins: 0, losses: 0, winRate: 0, currentStreak: 0, bestStreak: 0 }, mockUsed: true }, { headers: { 'x-trace-id': traceId } });
+    }
     const { userId } = await auth();
     
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userProfile = await getCurrentUserProfile();
-    if (!userProfile) {
+    // Get user id
+    const { data: userProfile, error: userError } = await supabaseServer
+      .from('users')
+      .select('id')
+      .eq('clerk_user_id', userId)
+      .single();
+
+    if (userError || !userProfile) {
+      logger.warn('User not found for battle stats', { userId, error: userError?.message });
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -26,7 +40,7 @@ export async function GET(request: NextRequest) {
       .eq('status', 'completed');
 
     if (battlesError) {
-      console.error('Error fetching battles:', battlesError);
+      logger.error('Error fetching battles', { error: battlesError.message });
       return NextResponse.json(
         { error: 'Failed to fetch battle statistics' },
         { status: 500 }
@@ -75,9 +89,9 @@ export async function GET(request: NextRequest) {
       bestStreak,
     };
 
-    return NextResponse.json({ stats });
+    return NextResponse.json({ stats, mockUsed: false }, { headers: { 'x-trace-id': traceId } });
   } catch (error) {
-    console.error('Battle stats error:', error);
+    logger.error('Battle stats error', { error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

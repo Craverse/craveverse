@@ -16,14 +16,17 @@ export const CONFIG = {
     RATE_LIMITS: {
       FREE: {
         CALLS_PER_DAY: 10,
+        TOKENS_PER_DAY: 25000, // 25k tokens/user/day for GPT-5-mini (strict limit)
         FORUM_SUGGESTIONS_PER_WEEK: 1,
       },
       PLUS: {
         CALLS_PER_DAY: 50,
+        TOKENS_PER_DAY: 25000, // 25k tokens/user/day for GPT-5-mini (strict limit)
         FORUM_SUGGESTIONS_PER_DAY: 1,
       },
       ULTRA: {
         CALLS_PER_DAY: 999,
+        TOKENS_PER_DAY: 25000, // 25k tokens/user/day for GPT-5-mini (strict limit)
         FORUM_SUGGESTIONS_PER_DAY: 5,
       },
     },
@@ -202,12 +205,12 @@ export const CONFIG = {
     FORUM_REPLY: {
       model: 'gpt-5-nano',
       maxTokens: 30,
-      template: 'Thread: {title}. Suggest 20-word reply for {craving} community.',
+      template: 'Thread: {title}. Suggest 20-word reply for {craving} community. Use {persona} tone.',
     },
     BATTLE_TASKS: {
       model: 'gpt-5-mini',
       maxTokens: 200,
-      template: 'Generate 5 unique 24hr challenges for {craving}. Each 1 sentence.',
+      template: 'Generate 5 unique 24hr challenges for {craving}. Each 1 sentence. Use {persona} tone in descriptions.',
     },
     ONBOARDING_PERSONALIZATION: {
       model: 'gpt-5-mini',

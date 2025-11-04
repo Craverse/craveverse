@@ -1,10 +1,23 @@
 // TEMPORARY: Diagnostic endpoint to check environment variables
 // DELETE THIS FILE after diagnosis
 import { NextResponse } from 'next/server';
+import { createLogger, createTraceId } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const traceId = createTraceId();
+  const logger = createLogger('debug-env-check', traceId);
+  
+  // Guard in production unless admin token provided
+  if (process.env.NODE_ENV === 'production') {
+    const token = request.headers.get('x-admin-token');
+    if (!token || token !== process.env.ADMIN_TOKEN) {
+      logger.warn('Unauthorized access to debug env-check endpoint');
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+  }
+
   const envCheck = {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'unknown',
@@ -66,6 +79,6 @@ export async function GET() {
     envCheck.diagnosis = 'Environment variables appear to be configured correctly';
   }
 
-  return NextResponse.json(envCheck);
+  return NextResponse.json(envCheck, { headers: { 'x-trace-id': traceId } });
 }
 

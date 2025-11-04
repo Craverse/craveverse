@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useUser } from '@clerk/nextjs';
+// import { useUser } from '@clerk/nextjs'; // BYPASSED FOR MOCK MODE
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -18,9 +18,17 @@ import { CONFIG } from '../../lib/config';
 import { useUserContext } from '@/contexts/user-context'; // NEW: Import context
 import { useLogger } from '@/lib/logger'; // NEW: Import logger
 
+interface OnboardingData {
+  selectedCraving: string | null;
+  quizAnswers: Record<string, any>;
+  personalization: any;
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
-  const { user, isLoaded } = useUser();
+  // MOCK MODE: Bypass Clerk authentication
+  const user = { id: 'mock-user-123' };
+  const isLoaded = true;
   const { refreshProfile } = useUserContext(); // NEW: Get refresh methods
   const logger = useLogger('OnboardingPage'); // NEW: Use logger
   const [currentStep, setCurrentStep] = useState(1);
@@ -78,7 +86,7 @@ export default function OnboardingPage() {
       setOnboardingData(prev => ({ ...prev, personalization }));
       setCurrentStep(4);
     } catch (error) {
-      console.error('Personalization error:', error);
+      logger.error('Personalization error', { error: error instanceof Error ? error.message : 'Unknown error' });
       // Fallback to generic personalization
       setOnboardingData(prev => ({
         ...prev,
@@ -131,9 +139,9 @@ export default function OnboardingPage() {
       logger.info('Onboarding completion successful', { result });
 
       // Enhanced verification with context refresh
-      if (forceRefreshProfile) {
+      if (refreshProfile) {
         logger.info('Force refreshing user context after onboarding');
-        await forceRefreshProfile();
+        await refreshProfile();
         
         // Additional verification with API call
         const verifyResponse = await fetch(`/api/user/profile?t=${Date.now()}&force=true`, {
