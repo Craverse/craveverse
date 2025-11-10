@@ -35,7 +35,7 @@ export function NotificationSettings() {
           daily_reminder_time: json.preferences?.daily_reminder_time ?? '09:00',
         });
         setStatus('idle');
-      } catch (error) {
+      } catch {
         setStatus('error');
         const errorMsg = 'Unable to load notification settings.';
         setErrorMessage(errorMsg);
@@ -58,7 +58,7 @@ export function NotificationSettings() {
       setStatus('saved');
       toast.success('Notification preferences updated successfully!');
       setTimeout(() => setStatus('idle'), 2000);
-    } catch (error) {
+    } catch {
       setStatus('error');
       const errorMsg = 'Failed to save preferences. Please try again.';
       setErrorMessage(errorMsg);

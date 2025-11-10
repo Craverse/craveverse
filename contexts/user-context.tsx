@@ -1,9 +1,11 @@
 // User context provider for state management with optimistic updates
 'use client';
 
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useLogger } from '@/lib/logger';
 import { isMockMode } from '@/lib/utils';
+import { trackJourneyEvent, trackLatency } from '@/lib/telemetry';
 
 // Import Clerk hook normally - React requires hooks to be called unconditionally
 // We'll handle ClerkProvider availability through AuthGate ensuring it's present when needed
@@ -23,6 +25,8 @@ interface UserProfile {
   subscription_tier: string;
   ai_summary: string;
   preferences: any;
+  is_newbie?: boolean;
+  onboarding_completed_at?: string | null;
 }
 
 interface UserContextType {
@@ -61,7 +65,10 @@ export function UserProvider({ children }: UserProviderProps) {
 
   // Determine user based on mock mode or actual Clerk user
   // This logic happens AFTER hooks are called unconditionally
-  const user = mock ? { id: 'mock-user-123' } : (clerkResult?.user || null);
+  const user = useMemo(
+    () => (mock ? { id: 'mock-user-123' } : clerkResult?.user || null),
+    [mock, clerkResult?.user],
+  );
   const isLoaded = mock ? true : (clerkResult?.isLoaded ?? false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -70,90 +77,144 @@ export function UserProvider({ children }: UserProviderProps) {
   
   // Track if fetch is in progress to prevent duplicate calls
   const isFetchingRef = useRef(false);
+  const profileLoggedRef = useRef(false);
   
   // Memoize user ID to prevent unnecessary re-renders
   const userId = user?.id || null;
 
+  // Request cache to prevent duplicate fetches within short time window
+  const lastFetchRef = useRef<{ timestamp: number; promise: Promise<void> } | null>(null);
+  
   const fetchProfile = useCallback(async (traceId?: string) => {
     // Prevent duplicate concurrent fetches
     if (isFetchingRef.current) {
       logger.info('Fetch already in progress, skipping');
+      // Return existing promise if available
+      if (lastFetchRef.current && Date.now() - lastFetchRef.current.timestamp < 1000) {
+        return lastFetchRef.current.promise;
+      }
       return;
+    }
+    
+    // Check cache - if fetched within last 2 seconds, return cached promise
+    if (lastFetchRef.current && Date.now() - lastFetchRef.current.timestamp < 2000) {
+      logger.info('Using cached fetch result');
+      return lastFetchRef.current.promise;
     }
     
     isFetchingRef.current = true;
-    // MOCK MODE: Return mock data immediately, no API calls
-    if (mock) {
-      logger.info('Mock mode: Using mock profile data');
-      const mockProfile: UserProfile = {
-        id: 'mock-user-123',
-        clerk_user_id: 'mock-clerk-id',
-        name: 'Alex Chen',
-        email: 'alex@example.com',
-        avatar_url: null,
-        primary_craving: 'nofap',
-        current_level: 12,
-        xp: 1250,
-        cravecoins: 340,
-        streak_count: 45,
-        subscription_tier: 'free',
-        ai_summary: 'You\'re doing amazing! Keep up the great work on your NoFap journey.',
-        preferences: {
-          quizAnswers: {
-            severity: 'moderate',
-            triggers: ['stress', 'boredom'],
-            attempts: 'multiple'
+    // Create fetch promise
+  const fetchPromise = (async () => {
+      const fetchStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      // MOCK MODE: Return mock data immediately, no API calls
+      if (mock) {
+        logger.info('Mock mode: Using mock profile data');
+        const mockProfile: UserProfile = {
+          id: 'mock-user-123',
+          clerk_user_id: 'mock-clerk-id',
+          name: 'Alex Chen',
+          email: 'alex@example.com',
+          avatar_url: null,
+          primary_craving: 'nofap',
+          current_level: 12,
+          xp: 1250,
+          cravecoins: 340,
+          streak_count: 45,
+          subscription_tier: 'free',
+          ai_summary: 'You\'re doing amazing! Keep up the great work on your NoFap journey.',
+          preferences: {
+            quizAnswers: {
+              severity: 'moderate',
+              triggers: ['stress', 'boredom'],
+              attempts: 'multiple'
+            },
+            personalization: {
+              motivation: 'health',
+              support_level: 'high'
+            }
           },
-          personalization: {
-            motivation: 'health',
-            support_level: 'high'
-          }
-        }
-      };
-      setUserProfile(mockProfile);
-      setSyncStatus('success');
-      setIsLoading(false);
-      isFetchingRef.current = false;
-      return;
-    }
-
-    // REAL MODE: Only make API calls when not in mock mode
-    if (!user || !userId) {
-      logger.info('No user available in real mode');
-      setUserProfile(null);
-      setSyncStatus('error');
-      setIsLoading(false);
-      isFetchingRef.current = false;
-      return;
-    }
-
-    logger.info('Fetching user profile from API', { userId });
-    setSyncStatus('syncing');
-    
-    try {
-      const response = await fetch('/api/user/profile', {
-        headers: {
-          'x-trace-id': traceId || Math.random().toString(36).substring(2, 15),
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch profile: ${response.status}`);
+          is_newbie: false,
+          onboarding_completed_at: new Date().toISOString(),
+        };
+        setUserProfile(mockProfile);
+        setSyncStatus('success');
+        setIsLoading(false);
+        isFetchingRef.current = false;
+        trackLatency('profile_fetch', 0, true, { source: 'mock' });
+        return;
       }
+
+      // REAL MODE: Only make API calls when not in mock mode
+      if (!user || !userId) {
+        logger.info('No user available in real mode');
+        setUserProfile(null);
+        setSyncStatus('error');
+        setIsLoading(false);
+        isFetchingRef.current = false;
+        return;
+      }
+
+      logger.info('Fetching user profile from API', { userId });
+      setSyncStatus('syncing');
       
-      const data = await response.json();
-      setUserProfile(data.user);
-      setSyncStatus('success');
-      logger.info('Profile fetched successfully', { profile: data.user });
-    } catch (error) {
-      logger.error('Failed to fetch profile', { error: error instanceof Error ? error.message : 'Unknown error' });
-      setError(error instanceof Error ? error.message : 'Failed to fetch profile');
-      setSyncStatus('error');
-    } finally {
-      setIsLoading(false);
-      isFetchingRef.current = false;
-    }
-  }, [userId, mock, logger]);
+      try {
+        // Add timeout to prevent hanging
+        const controller = new AbortController();
+        const PROFILE_FETCH_TIMEOUT_MS = 15000;
+        const timeoutId = setTimeout(() => {
+          logger.warn('Profile fetch exceeded timeout, aborting request', { userId });
+          controller.abort();
+        }, PROFILE_FETCH_TIMEOUT_MS);
+        
+        const response = await fetch('/api/user/profile', {
+          headers: {
+            'x-trace-id': traceId || Math.random().toString(36).substring(2, 15),
+          },
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch profile: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        setUserProfile(data.user);
+        setSyncStatus('success');
+        logger.info('Profile fetched successfully', { profile: data.user });
+        const duration = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStart;
+        trackLatency('profile_fetch', duration, true, {
+          source: '/api/user/profile',
+          mockUsed: data.mockUsed,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          logger.warn('Profile fetch aborted after timeout', { userId });
+        } else {
+          logger.error('Failed to fetch profile', { error: error instanceof Error ? error.message : 'Unknown error' });
+          setError(error instanceof Error ? error.message : 'Failed to fetch profile');
+        }
+        setSyncStatus('error');
+        const duration = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStart;
+        trackLatency('profile_fetch', duration, false, {
+          reason: error instanceof Error ? error.message : 'unknown',
+          source: '/api/user/profile',
+        });
+      } finally {
+        setIsLoading(false);
+        isFetchingRef.current = false;
+      }
+    })();
+    
+    // Cache the promise
+    lastFetchRef.current = {
+      timestamp: Date.now(),
+      promise: fetchPromise,
+    };
+    
+    return fetchPromise;
+  }, [userId, user, mock, logger]);
 
   // Debounce refresh calls to prevent rapid successive requests
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -208,41 +269,38 @@ export function UserProvider({ children }: UserProviderProps) {
     if (isLoaded && userId) {
       fetchProfileRef.current();
     }
-    // Only depend on isLoaded and userId - fetchProfile accessed via ref
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded, userId]);
 
-  // Refresh profile when window becomes visible
-  // Use ref to store latest refreshProfile to avoid dependency issues
-  const refreshProfileRef = useRef(refreshProfile);
   useEffect(() => {
-    refreshProfileRef.current = refreshProfile;
-  }, [refreshProfile]);
+    if (userProfile && !profileLoggedRef.current) {
+      profileLoggedRef.current = true;
+      trackJourneyEvent('profile_loaded_client', {
+        metadata: {
+          primaryCraving: userProfile.primary_craving,
+          hasPersonalization: Boolean(userProfile.preferences?.onboarding),
+          onboardingComplete: userProfile.is_newbie === false,
+        },
+      });
+    }
+  }, [userProfile]);
 
+  // Cleanup debounce timeout on unmount
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && userId) {
-        logger.info('Window became visible, refreshing profile');
-        refreshProfileRef.current();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      // Cleanup debounce timeout
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
       }
     };
-    // Only depend on userId - refreshProfile accessed via ref
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, []);
 
   // Memoize onboarding status to prevent unnecessary recalculations
   const isOnboardingComplete = useMemo(() => {
-    return userProfile?.primary_craving !== null && userProfile?.primary_craving !== undefined;
-  }, [userProfile?.primary_craving]);
+    if (!userProfile) return false;
+    if (typeof userProfile.is_newbie === 'boolean') {
+      return !userProfile.is_newbie;
+    }
+    return userProfile.primary_craving !== null && userProfile.primary_craving !== undefined;
+  }, [userProfile]);
 
   const value: UserContextType = {
     userProfile,

@@ -4,11 +4,7 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { MessageSquare, Swords, ShoppingCart, Trophy, Crown } from 'lucide-react';
 
-interface QuickActionsProps {
-  userTier?: string;
-}
-
-export function QuickActions({ userTier }: QuickActionsProps) {
+export function QuickActions() {
   return (
     <Card>
       <CardHeader>

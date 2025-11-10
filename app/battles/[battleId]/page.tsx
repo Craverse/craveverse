@@ -4,25 +4,24 @@
 // Force dynamic rendering for auth-protected page
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { 
-  Sword, 
-  Trophy, 
-  Clock, 
+import {
+  Sword,
+  Trophy,
+  Clock,
   Target,
-  Zap,
-  Crown,
-  Star,
   CheckCircle2,
   XCircle,
-  Timer
+  Timer,
+  Zap,
+  Star,
+  Crown,
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
 
 interface Battle {
   id: string;
@@ -58,32 +57,7 @@ export default function BattlePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [timeRemaining, setTimeRemaining] = useState<string>('');
 
-  useEffect(() => {
-    fetchBattleData();
-    
-    // Update time remaining every minute
-    const interval = setInterval(updateTimeRemaining, 60000);
-    return () => clearInterval(interval);
-  }, [battleId]);
-
-  const fetchBattleData = async () => {
-    try {
-      setIsLoading(true);
-      const response = await fetch(`/api/battles/${battleId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setBattle(data.battle);
-        setTasks(data.tasks || []);
-        updateTimeRemaining();
-      }
-    } catch (error) {
-      console.error('Error fetching battle data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const updateTimeRemaining = () => {
+  const updateTimeRemaining = useCallback(() => {
     if (battle && battle.status === 'active' && battle.end_time) {
       const endTime = new Date(battle.end_time);
       const now = new Date();
@@ -97,7 +71,45 @@ export default function BattlePage() {
         setTimeRemaining('Time up!');
       }
     }
-  };
+  }, [battle]);
+
+  const fetchBattleData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      // Add timeout with AbortController
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch(`/api/battles/${battleId}`, {
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setBattle(data.battle);
+        setTasks(data.tasks || []);
+        updateTimeRemaining();
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.warn('Battle fetch timeout');
+      } else {
+        console.error('Error fetching battle data:', error);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [battleId, updateTimeRemaining]);
+
+  useEffect(() => {
+    fetchBattleData();
+    
+    // Update time remaining every minute
+    const interval = setInterval(updateTimeRemaining, 60000);
+    return () => clearInterval(interval);
+  }, [battleId, fetchBattleData, updateTimeRemaining]);
 
   const handleTaskComplete = async (taskId: string) => {
     try {

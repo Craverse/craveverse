@@ -8,20 +8,6 @@ interface AuthGateProps {
   fallback?: ReactNode;
 }
 
-// Check if route requires authentication
-function requiresAuth(pathname: string): boolean {
-  const publicRoutes = ['/', '/pricing', '/sign-in', '/sign-up'];
-  const authRoutes = ['/dashboard', '/onboarding', '/map', '/shop', '/forum', '/battles', '/leaderboard', '/settings', '/levels', '/progress', '/admin'];
-  
-  // Exact match for public routes
-  if (publicRoutes.some(route => pathname === route || pathname.startsWith(`${route}/`))) {
-    return false;
-  }
-  
-  // Check if any auth route matches
-  return authRoutes.some(route => pathname.startsWith(route));
-}
-
 export function AuthGate({ children }: AuthGateProps) {
   // ALWAYS provide ClerkProvider - even in mock mode
   // Clerk components (SignUp, SignIn) REQUIRE ClerkProvider to function

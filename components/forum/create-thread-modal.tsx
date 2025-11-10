@@ -10,10 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { 
   MessageSquare, 
-  Plus, 
-  Zap,
-  Users,
-  Target
+  Plus 
 } from 'lucide-react';
 
 interface CreateThreadModalProps {

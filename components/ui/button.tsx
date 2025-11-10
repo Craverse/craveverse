@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
@@ -39,14 +40,72 @@ export interface ButtonProps
   asChild?: boolean
 }
 
+// Simple hash function for deterministic IDs (no Math.random)
+function hashString(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return Math.abs(hash).toString(36).substring(0, 6);
+}
+
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button"
+    
+    // Get data-button-id from props if provided
+    const providedId = (props as any)['data-button-id'] as string | undefined;
+    
+    // Generate deterministic button ID for testing (only on client after hydration)
+    const [buttonId, setButtonId] = React.useState<string | undefined>(providedId);
+    
+    React.useEffect(() => {
+      // Only generate ID on client side after hydration
+      if (!buttonId && typeof window !== 'undefined') {
+        // Extract button text for deterministic ID
+        let buttonText = '';
+        if (typeof props.children === 'string') {
+          buttonText = props.children;
+        } else if (React.isValidElement(props.children)) {
+          // Try to extract text from React elements
+          const extractText = (node: React.ReactNode): string => {
+            if (typeof node === 'string') return node;
+            if (typeof node === 'number') return node.toString();
+            if (React.isValidElement(node)) {
+              const nodeProps = node.props as any;
+              if (nodeProps?.children) {
+                return extractText(nodeProps.children);
+              }
+            }
+            return '';
+          };
+          buttonText = extractText(props.children);
+        }
+        
+        // Create deterministic ID from button text and onClick handler
+        const textSlug = buttonText.replace(/\s+/g, '-').toLowerCase().substring(0, 20) || 'btn';
+        const onClickName = props.onClick?.toString() || '';
+        const hash = hashString(textSlug + onClickName);
+        setButtonId(`btn-${textSlug}-${hash}`);
+      }
+    }, [buttonId, props.children, props.onClick]);
+    
+    // Add data attributes for testing (only if ID exists to avoid hydration mismatch)
+    const dataProps = {
+      ...props,
+      ...(buttonId && {
+        'data-button-id': buttonId,
+        'data-button-type': asChild ? 'link' : 'button',
+      } as any),
+    };
+    
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
-        {...props}
+        {...dataProps}
       />
     )
   }
@@ -55,6 +114,7 @@ Button.displayName = "Button"
 
 export { Button, buttonVariants }
 
+/* eslint-enable react-refresh/only-export-components */
 
 
 

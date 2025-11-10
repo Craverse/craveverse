@@ -3,7 +3,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@clerk/nextjs';
 import { useUserContext } from '@/contexts/user-context';
@@ -11,8 +11,10 @@ import { DashboardStats } from '@/components/dashboard-stats';
 import { QuickActions } from '@/components/quick-actions';
 import { RecentActivity } from '@/components/recent-activity';
 import { LevelCard } from '@/components/levels/level-card';
+import { PauseTokenWidget } from '@/components/dashboard/pause-token-widget';
 import { DebugPanel } from '@/components/debug-panel';
 import { useLogger } from '@/lib/logger';
+import { trackJourneyEvent, trackLatency } from '@/lib/telemetry';
 import { isMockMode } from '@/lib/utils';
 
 export default function DashboardPage() {
@@ -41,11 +43,133 @@ export default function DashboardPage() {
     }
   }, [isLoading, userProfile, isOnboardingComplete, router, logger]);
 
+  // State for fetched level data
+  const [fetchedLevelData, setFetchedLevelData] = useState<any>(null);
+  
+  // Ref to track if fetch is in progress (request deduplication)
+  const isFetchingLevelRef = useRef(false);
+  const personalizationLoggedRef = useRef(false);
+
+  const LEVEL_FETCH_TIMEOUT_MS = 15000;
+
+  const fetchLevelData = useCallback(async () => {
+    if (!userProfile?.current_level || !userProfile?.primary_craving) {
+      return;
+    }
+
+    if (isFetchingLevelRef.current) {
+      return;
+    }
+
+    isFetchingLevelRef.current = true;
+    const fetchStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    let latencyReported = false;
+
+    try {
+      let resolvedLevel: any | null = null;
+      let resolvedSource: 'level-detail' | 'levels-list' | 'fallback' = 'fallback';
+
+      const levelId = `level-${userProfile.current_level}`;
+      const controller = new AbortController();
+      const fetchTimeoutId = setTimeout(() => {
+        logger.warn('Level detail fetch exceeded timeout, aborting request', { levelId });
+        controller.abort();
+      }, LEVEL_FETCH_TIMEOUT_MS);
+
+      const response = await fetch(`/api/levels/${levelId}`, {
+        signal: controller.signal,
+      });
+
+      clearTimeout(fetchTimeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.level) {
+          resolvedLevel = data.level;
+          resolvedSource = 'level-detail';
+        }
+      }
+
+      if (!resolvedLevel) {
+        const fallbackController = new AbortController();
+        const fallbackTimeoutId = setTimeout(() => {
+          logger.warn('Levels list fetch exceeded timeout, aborting request', { craving: userProfile.primary_craving });
+          fallbackController.abort();
+        }, LEVEL_FETCH_TIMEOUT_MS);
+
+        const levelsResponse = await fetch(`/api/levels?craving=${userProfile.primary_craving}`, {
+          signal: fallbackController.signal,
+        });
+
+        clearTimeout(fallbackTimeoutId);
+
+        if (levelsResponse.ok) {
+          const levelsData = await levelsResponse.json();
+          const matchingLevel = levelsData.levels?.find(
+            (l: any) => l.level_number === userProfile.current_level,
+          );
+          if (matchingLevel) {
+            resolvedLevel = matchingLevel;
+            resolvedSource = 'levels-list';
+          }
+        }
+      }
+
+      if (resolvedLevel) {
+        setFetchedLevelData(resolvedLevel);
+        logger.info('Level data loaded', { levelId: resolvedLevel.id, source: resolvedSource });
+        const duration = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStart;
+        trackLatency('level_data_fetch', duration, true, {
+          source: resolvedSource,
+          levelNumber: resolvedLevel.level_number,
+        });
+        latencyReported = true;
+      } else {
+        logger.warn('Level data unavailable after retries', { levelId });
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        logger.error('Level data request aborted after timeout');
+      } else {
+        logger.error('Error fetching level data', {
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    } finally {
+      if (!latencyReported) {
+        const duration = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - fetchStart;
+        trackLatency('level_data_fetch', duration, false, {
+          source: 'timeout',
+          levelNumber: userProfile?.current_level,
+        });
+      }
+      isFetchingLevelRef.current = false;
+    }
+  }, [logger, userProfile?.current_level, userProfile?.primary_craving]);
+
+  useEffect(() => {
+    fetchLevelData();
+  }, [fetchLevelData]);
+
   // Memoize level data at the top level (before any conditional returns)
   // This must be called unconditionally to comply with Rules of Hooks
   const currentLevelData = useMemo(() => {
+    // Use fetched level data if available
+    if (fetchedLevelData) {
+      return {
+        id: fetchedLevelData.id || `level-${fetchedLevelData.level_number}`,
+        level_number: fetchedLevelData.level_number,
+        title: fetchedLevelData.title || 'Mindful Awareness',
+        description: fetchedLevelData.description || 'A focused step in your 30-level journey.',
+        challenge_text: fetchedLevelData.challenge_text || 'Perform 10 minutes of mindful breathing when urges arise.',
+        xp_reward: fetchedLevelData.xp_reward || 100,
+        coin_reward: fetchedLevelData.coin_reward || 25,
+        difficulty: (fetchedLevelData.difficulty || 'medium'),
+      };
+    }
+    
+    // Fallback to userProfile-based data if no fetched data yet
     if (!userProfile) {
-      // Return a default level structure if profile is not available yet
       return {
         id: 'level-1',
         level_number: 1,
@@ -57,6 +181,7 @@ export default function DashboardPage() {
         difficulty: 'medium' as const,
       };
     }
+    
     return {
       id: `level-${userProfile.current_level}`,
       level_number: userProfile.current_level,
@@ -67,9 +192,55 @@ export default function DashboardPage() {
       coin_reward: 25,
       difficulty: 'medium' as const,
     };
-  }, [userProfile?.current_level]);
+  }, [fetchedLevelData, userProfile]);
 
-  // Show loading state while checking auth or loading profile
+  const onboardingPersonalization = useMemo(() => {
+    if (!userProfile?.preferences || typeof userProfile.preferences !== 'object') {
+      return null;
+    }
+    const onboardingPrefs = (userProfile.preferences as Record<string, any>).onboarding;
+    if (!onboardingPrefs || typeof onboardingPrefs !== 'object') {
+      return null;
+    }
+    return onboardingPrefs.personalization ?? onboardingPrefs;
+  }, [userProfile]);
+
+  useEffect(() => {
+    if (onboardingPersonalization && userProfile && !personalizationLoggedRef.current) {
+      personalizationLoggedRef.current = true;
+      trackJourneyEvent('dashboard_personalization_applied', {
+        metadata: {
+          primaryCraving: userProfile.primary_craving,
+          hasIntro: Boolean(onboardingPersonalization?.introMessage),
+        },
+      });
+    }
+  }, [onboardingPersonalization, userProfile]);
+
+  useEffect(() => {
+    if (fetchedLevelData) {
+      trackJourneyEvent('level_data_loaded', {
+        metadata: {
+          levelNumber: fetchedLevelData.level_number,
+          source: 'api',
+        },
+      });
+    }
+  }, [fetchedLevelData]);
+
+  useEffect(() => {
+    if (userProfile?.current_level) {
+      trackJourneyEvent('level_presented', {
+        metadata: {
+          levelNumber: userProfile.current_level,
+          source: fetchedLevelData ? 'api' : 'profile',
+        },
+      });
+    }
+  }, [userProfile?.current_level, fetchedLevelData]);
+
+  // Show loading state only for critical data (auth and profile)
+  // Don't block dashboard render for level data - it loads in background
   if (!clerkLoaded || isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -133,10 +304,12 @@ export default function DashboardPage() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Welcome back, {userProfile.name}!</h1>
               <p className="text-gray-600 mt-1">
-                Ready to continue your {userProfile.primary_craving} journey? You're on level {userProfile.current_level}!
+                {onboardingPersonalization?.introMessage
+                  ? onboardingPersonalization.introMessage
+                  : `Ready to continue your ${userProfile.primary_craving} journey? You're on level ${userProfile.current_level}!`}
               </p>
             </div>
-            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-4">
               <div className="text-right">
                 <div className="text-2xl font-bold text-crave-orange">{userProfile.streak_count}</div>
                 <div className="text-sm text-gray-500">Day Streak</div>
@@ -144,8 +317,8 @@ export default function DashboardPage() {
               <div className="w-12 h-12 bg-crave-orange rounded-full flex items-center justify-center text-white font-bold text-lg">
                 {userProfile.current_level}
               </div>
-            </div>
-          </div>
+                </div>
+              </div>
         </div>
       </div>
 
@@ -162,16 +335,17 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Today's Challenge via LevelCard */}
           <div className="lg:col-span-2">
-            <LevelCard
+                  <LevelCard
               level={currentLevelData}
               onComplete={() => {}}
-              userTier={userProfile.subscription_tier}
-            />
+                    userTier={userProfile.subscription_tier}
+                  />
           </div>
 
           {/* Quick Actions */}
           <div className="space-y-6">
-            <QuickActions userTier={userProfile.subscription_tier} />
+            <PauseTokenWidget />
+            <QuickActions />
             <RecentActivity />
           </div>
         </div>
@@ -181,8 +355,8 @@ export default function DashboardPage() {
           <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-6">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Your Progress</h2>
             <div className="space-y-6">
-              <div>
-                <div className="flex justify-between text-sm mb-2">
+                  <div>
+                    <div className="flex justify-between text-sm mb-2">
                   <span className="font-medium">Level Progress</span>
                   <span className="text-crave-orange font-bold">{Math.round((userProfile.current_level / 30) * 100)}%</span>
                 </div>
@@ -195,9 +369,9 @@ export default function DashboardPage() {
                 <div className="flex justify-between text-xs text-gray-500 mt-1">
                   <span>Level {userProfile.current_level}</span>
                   <span>Level 30</span>
-                </div>
-              </div>
-              
+                    </div>
+                  </div>
+                  
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="text-center p-4 bg-gray-50 rounded-lg">
                   <div className="text-2xl font-bold text-crave-orange">{userProfile.streak_count}</div>
@@ -206,13 +380,13 @@ export default function DashboardPage() {
                 <div className="text-center p-4 bg-gray-50 rounded-lg">
                   <div className="text-2xl font-bold text-blue-600">{userProfile.xp.toLocaleString()}</div>
                   <div className="text-sm text-gray-600">Total XP</div>
-                </div>
+                    </div>
                 <div className="text-center p-4 bg-gray-50 rounded-lg">
                   <div className="text-2xl font-bold text-yellow-600">{userProfile.cravecoins}</div>
                   <div className="text-sm text-gray-600">CraveCoins</div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
           </div>
         </div>
         {/* Debug Panel (dev only) */}

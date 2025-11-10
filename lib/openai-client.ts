@@ -38,10 +38,10 @@ function calculateCost(model: AIModelType, inputTokens: number, outputTokens: nu
 }
 
 // Generate prompt hash for caching
-function generatePromptHash(prompt: string, model: string, maxTokens: number): string {
+function generatePromptHash(prompt: string, model: string, maxCompletionTokens: number): string {
   const crypto = require('crypto');
   return crypto.createHash('sha256')
-    .update(`${prompt}:${model}:${maxTokens}`)
+    .update(`${prompt}:${model}:${maxCompletionTokens}`)
     .digest('hex');
 }
 
@@ -171,7 +171,7 @@ export class OpenAIClient {
   async generateResponse(
     prompt: string,
     model: AIModelType,
-    maxTokens: number,
+    maxCompletionTokens: number,
     temperature: number = 0.7
   ): Promise<{ response: string; cached: boolean; cost: number }> {
     // Check daily token limit first (25k tokens/user/day for GPT-5-mini)
@@ -187,7 +187,7 @@ export class OpenAIClient {
     }
 
     // Generate cache key
-    const promptHash = generatePromptHash(prompt, model, maxTokens);
+    const promptHash = generatePromptHash(prompt, model, maxCompletionTokens);
     const cacheKey = `ai_response:${promptHash}`;
 
     // Check cache first
@@ -203,7 +203,7 @@ export class OpenAIClient {
 
     // Calculate tokens and cost
     const inputTokens = estimateTokens(prompt);
-    const estimatedOutputTokens = Math.min(maxTokens, 50); // Estimate output tokens
+    const estimatedOutputTokens = Math.min(maxCompletionTokens, 50); // Estimate output tokens
     const cost = calculateCost(model, inputTokens, estimatedOutputTokens);
 
     // Check if cost would exceed budget
@@ -218,7 +218,7 @@ export class OpenAIClient {
       const completion = await openai.chat.completions.create({
         model,
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: maxTokens,
+        max_completion_tokens: maxCompletionTokens,
         temperature,
       });
 

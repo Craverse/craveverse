@@ -6,7 +6,7 @@ import { isMockMode, getEnv } from './utils';
 const createMockClient = () => ({
   from: (table: string) => ({
     // Mock API parameters intentionally unused to match Supabase API shape
-    select: (_columns = '*') => ({ 
+    select: () => ({ 
       eq: (_column: string, value: any) => ({ 
         single: () => {
           console.log(`MOCK DB: SELECT from ${table} WHERE ${_column} = ${value}`);

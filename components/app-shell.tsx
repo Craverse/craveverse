@@ -66,10 +66,14 @@ export default function AppShell({ children, showNavigation }: AppShellProps) {
       </div>
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-white z-40">
-        <div className="grid grid-cols-5 text-xs">
-          {navItems.slice(0, 5).map((item) => (
-            <Link key={item.href} href={item.href} className={`flex flex-col items-center justify-center py-2 ${isActive(item.href) ? 'text-gray-900' : 'text-gray-500'}`}>
+      <nav className="fixed bottom-0 left-0 right-0 border-t bg-white z-40 md:hidden">
+        <div className="flex overflow-x-auto text-xs">
+          {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex flex-col items-center justify-center py-2 px-3 min-w-[80px] ${isActive(item.href) ? 'text-gray-900 font-semibold' : 'text-gray-500'}`}
+            >
               <span className="text-lg">{item.icon}</span>
               <span>{item.label}</span>
             </Link>

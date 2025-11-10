@@ -4,25 +4,20 @@
 // Force dynamic rendering for auth-protected page
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Sword, 
-  Users, 
   Trophy, 
-  Clock,
-  Target,
   Zap,
-  Crown,
-  Star
 } from 'lucide-react';
 import { BattleCard } from '../../components/battles/battle-card';
 import { CreateBattleModal } from '../../components/battles/create-battle-modal';
 import { BattleStats } from '../../components/battles/battle-stats';
 import { useLogger } from '@/lib/logger';
+import { toast } from 'sonner';
 
 interface Battle {
   id: string;
@@ -55,28 +50,49 @@ export default function BattlesPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [stats, setStats] = useState<BattleStats | null>(null);
 
-  useEffect(() => {
-    fetchBattles();
-    fetchStats();
-  }, []);
-
-  const fetchBattles = async () => {
+  const fetchBattles = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await fetch('/api/battles');
+      // Add timeout with AbortController
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch('/api/battles', {
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
       if (response.ok) {
         const data = await response.json();
-        setActiveBattles(data.activeBattles);
-        setCompletedBattles(data.completedBattles);
+        setActiveBattles(data.activeBattles || []);
+        setCompletedBattles(data.completedBattles || []);
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to load battles' }));
+        logger.error('Error fetching battles', { error: errorData.error });
+        toast.error('Failed to load battles', {
+          description: errorData.error || 'Please try refreshing the page.',
+        });
       }
     } catch (error) {
-      logger.error('Error fetching battles', { error: error instanceof Error ? error.message : 'Unknown error' });
+      if (error instanceof Error && error.name === 'AbortError') {
+        logger.warn('Battles fetch timeout');
+        toast.error('Request timeout', {
+          description: 'Loading battles took too long. Please try again.',
+        });
+      } else {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.error('Error fetching battles', { error: errorMessage });
+        toast.error('Error loading battles', {
+          description: errorMessage,
+        });
+      }
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [logger]);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const response = await fetch('/api/battles/stats');
       if (response.ok) {
@@ -86,38 +102,24 @@ export default function BattlesPage() {
     } catch (error) {
       logger.error('Error fetching stats', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
-  };
+  }, [logger]);
 
-  const handleBattleCreated = () => {
+  useEffect(() => {
     fetchBattles();
-    setIsCreateModalOpen(false);
-  };
+    fetchStats();
+  }, [fetchBattles, fetchStats]);
 
-  const cravingOptions = [
-    { value: 'nofap', label: 'NoFap', icon: '🚫' },
-    { value: 'sugar', label: 'Sugar Free', icon: '🍭' },
-    { value: 'shopping', label: 'Shopping Control', icon: '🛍️' },
-    { value: 'smoking_vaping', label: 'Smoke Free', icon: '🚭' },
-    { value: 'social_media', label: 'Social Media Detox', icon: '📱' },
-  ];
-
-  const getCravingIcon = (craving: string) => {
-    const option = cravingOptions.find(opt => opt.value === craving);
-    return option?.icon || '🌐';
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'waiting':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'active':
-        return 'bg-green-100 text-green-800';
-      case 'completed':
-        return 'bg-blue-100 text-blue-800';
-      case 'cancelled':
-        return 'bg-gray-100 text-gray-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
+  const handleBattleCreated = async () => {
+    try {
+      await fetchBattles();
+      setIsCreateModalOpen(false);
+      toast.success('Battle created successfully!');
+    } catch (error) {
+      logger.error('Failed to refresh battles after creation', { error: error instanceof Error ? error.message : 'Unknown error' });
+      toast.error('Battle created but failed to refresh list', {
+        description: 'Please refresh the page to see your new battle.',
+      });
+      setIsCreateModalOpen(false);
     }
   };
 

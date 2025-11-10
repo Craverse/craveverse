@@ -1,7 +1,8 @@
 // Pricing page with subscription tiers
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,11 +11,49 @@ import { PRICING_TIERS } from '../../lib/config';
 
 export default function PricingPage() {
   const [isLoading, setIsLoading] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const highlightTier = searchParams.get('highlight');
+  const freeRef = useRef<HTMLDivElement>(null);
+  const plusRef = useRef<HTMLDivElement>(null);
+  const ultraRef = useRef<HTMLDivElement>(null);
+
+  const tierRefs = useMemo(
+    () => ({
+      free: freeRef,
+      plus: plusRef,
+      ultra: ultraRef,
+    }),
+    [freeRef, plusRef, ultraRef],
+  );
+
+  useEffect(() => {
+    const targetRef =
+      highlightTier && tierRefs[highlightTier as keyof typeof tierRefs]
+        ? tierRefs[highlightTier as keyof typeof tierRefs]
+        : null;
+
+    if (highlightTier && targetRef?.current) {
+      setTimeout(() => {
+        targetRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+        // Add highlight effect
+        const element = targetRef.current;
+        if (element) {
+          element.classList.add('ring-4', 'ring-crave-orange', 'ring-offset-2');
+          setTimeout(() => {
+            element.classList.remove('ring-4', 'ring-crave-orange', 'ring-offset-2');
+          }, 3000);
+        }
+      }, 300);
+    }
+  }, [highlightTier, tierRefs]);
 
   const handleSubscribe = async (tierId: string) => {
-    // Stripe disabled - all features are free
+    setIsLoading(tierId);
     alert('All features are currently free! No payment required. Enjoy your journey! 🎉');
-      setIsLoading(null);
+    setIsLoading(null);
   };
 
   const getTierIcon = (tierId: string) => {
@@ -70,10 +109,13 @@ export default function PricingPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
           {Object.values(PRICING_TIERS).map((tier) => (
             <Card 
-              key={tier.id} 
+              key={tier.id}
+              ref={tierRefs[tier.id as keyof typeof tierRefs]}
               className={`relative transition-all duration-200 hover:shadow-lg ${
                 tier.id === 'plus' ? 'scale-105 border-crave-orange' : ''
-              } ${getTierColor(tier.id)}`}
+              } ${getTierColor(tier.id)} ${
+                highlightTier === tier.id ? 'ring-4 ring-crave-orange ring-offset-2' : ''
+              }`}
             >
               {tier.id === 'plus' && (
                 <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">

@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { NotificationSettings } from '@/components/settings/notification-settings';
+import { ThemeSelector } from '@/components/settings/theme-selector';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,8 @@ export default function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
+
+        <ThemeSelector />
 
         <NotificationSettings />
 

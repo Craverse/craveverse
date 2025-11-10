@@ -40,7 +40,9 @@ export async function GET(request: NextRequest) {
             motivation: 'health',
             support_level: 'high'
           }
-        }
+        },
+        is_newbie: false,
+        onboarding_completed_at: new Date().toISOString(),
       };
       
       const mockLevel = {
@@ -82,7 +84,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch user profile from Supabase with timeout
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Database timeout')), 5000)
+      setTimeout(() => reject(new Error('Database timeout')), 2000) // Reduced from 5s to 2s
     );
     
     const queryPromise = supabaseServer
@@ -108,7 +110,9 @@ export async function GET(request: NextRequest) {
         streak_count: 0,
         subscription_tier: 'free',
         ai_summary: 'Welcome to CraveVerse!',
-        preferences: {}
+        preferences: {},
+        is_newbie: true,
+        onboarding_completed_at: null,
       };
       
       return NextResponse.json({
@@ -179,7 +183,9 @@ export async function GET(request: NextRequest) {
         streak_count: 0,
         subscription_tier: 'free',
         ai_summary: 'Welcome to CraveVerse!',
-        preferences: {}
+        preferences: {},
+        is_newbie: true,
+        onboarding_completed_at: null,
       },
       currentLevel: null,
       timestamp: new Date().toISOString(),

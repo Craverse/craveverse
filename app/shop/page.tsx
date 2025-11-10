@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ShopItemCard } from '@/components/shop/shop-item-card';
 import { PurchaseModal } from '@/components/shop/purchase-modal';
 import { useUserContext } from '@/contexts/user-context';
 import { AuthGuard } from '@/components/auth-guard';
 import { toast } from 'sonner';
+import { InventoryDisplay, InventoryEntry, PurchaseEntry } from '@/components/shop/inventory-display';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,26 +28,64 @@ export default function ShopPage() {
   const [activeItem, setActiveItem] = useState<ShopItem | null>(null);
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'consumable' | 'utility' | 'cosmetic'>('all');
+  const [inventoryItems, setInventoryItems] = useState<InventoryEntry[]>([]);
+  const [isInventoryLoading, setIsInventoryLoading] = useState(true);
+  const [purchaseHistory, setPurchaseHistory] = useState<PurchaseEntry[]>([]);
+  const [isPurchasesLoading, setIsPurchasesLoading] = useState(true);
+
+  const loadShopItems = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const res = await fetch('/api/shop/items');
+      if (!res.ok) throw new Error('Failed to load items');
+      const json = await res.json();
+      setItems(json.items || []);
+    } catch {
+      const errorMsg = 'Failed to load shop items';
+      setError(errorMsg);
+      toast.error(errorMsg);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const loadInventory = useCallback(async () => {
+    try {
+      setIsInventoryLoading(true);
+      const res = await fetch('/api/rewards/inventory');
+      if (!res.ok) throw new Error('Failed to load inventory');
+      const json = await res.json();
+      setInventoryItems(json.inventory || []);
+    } catch {
+      setInventoryItems([]);
+    } finally {
+      setIsInventoryLoading(false);
+    }
+  }, []);
+
+  const loadPurchases = useCallback(async () => {
+    try {
+      setIsPurchasesLoading(true);
+      const res = await fetch('/api/shop/purchases');
+      if (!res.ok) throw new Error('Failed to load purchases');
+      const json = await res.json();
+      setPurchaseHistory(json.purchases || []);
+    } catch {
+      setPurchaseHistory([]);
+    } finally {
+      setIsPurchasesLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const res = await fetch('/api/shop/items');
-        if (!res.ok) throw new Error('Failed to load items');
-        const json = await res.json();
-        setItems(json.items || []);
-      } catch (e) {
-        const errorMsg = 'Failed to load shop items';
-        setError(errorMsg);
-        toast.error(errorMsg);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    load();
-  }, []);
+    loadShopItems();
+  }, [loadShopItems]);
+
+  useEffect(() => {
+    loadInventory();
+    loadPurchases();
+  }, [loadInventory, loadPurchases]);
 
   const filteredItems = useMemo(() => {
     if (filter === 'all') return items;
@@ -74,13 +113,15 @@ export default function ShopPage() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.error || 'Purchase failed');
       }
-      const data = await res.json();
+      await res.json();
       // Refresh profile to update coin balance
       refreshProfile?.();
       setActiveItem(null);
       toast.success('Purchase successful!', {
         description: `${activeItem.name} has been added to your inventory.`,
       });
+      await loadInventory();
+      await loadPurchases();
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : 'Purchase failed. Please try again.';
       toast.error('Purchase failed', {
@@ -126,6 +167,15 @@ export default function ShopPage() {
               isPurchasing={isPurchasing && activeItem?.id === item.id}
             />
           ))}
+        </div>
+
+        <div className="mt-10">
+          <InventoryDisplay
+            inventory={inventoryItems}
+            purchases={purchaseHistory}
+            isInventoryLoading={isInventoryLoading}
+            isPurchaseLoading={isPurchasesLoading}
+          />
         </div>
       </div>
 

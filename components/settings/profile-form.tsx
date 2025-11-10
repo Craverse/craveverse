@@ -37,7 +37,7 @@ export function ProfileForm() {
           avatar_url: json.profile?.avatar_url ?? userProfile?.avatar_url ?? null,
         });
         setStatus('idle');
-      } catch (error) {
+      } catch {
         setStatus('error');
         const errorMsg = 'Unable to load profile settings.';
         setErrorMessage(errorMsg);
@@ -68,7 +68,7 @@ export function ProfileForm() {
       setStatus('saved');
       toast.success('Profile updated successfully!');
       setTimeout(() => setStatus('idle'), 2000);
-    } catch (error) {
+    } catch {
       setStatus('error');
       const errorMsg = 'Failed to save changes. Please try again.';
       setErrorMessage(errorMsg);

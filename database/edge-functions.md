@@ -1,6 +1,6 @@
 # Supabase Edge Functions for CraveVerse
 
-This document describes the Supabase Edge Functions required for the CraveVerse application. Edge Functions are serverless TypeScript functions that run in Supabase's infrastructure.
+This document outlines the Supabase Edge Functions planned for the CraveVerse application. Implementation stubs are not yet committed; treat each entry as a TODO until the corresponding function is created inside `supabase/functions/`.
 
 ## Setup Instructions
 

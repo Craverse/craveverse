@@ -1,8 +1,10 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ArrowUpRight } from 'lucide-react';
 
 type ShopItem = {
   id: string;
@@ -23,9 +25,14 @@ interface ShopItemCardProps {
 }
 
 export function ShopItemCard({ item, userCoins, userTier, onPurchase, isPurchasing = false }: ShopItemCardProps) {
+  const router = useRouter();
   const insufficientCoins = userCoins < item.price_coins;
   const tierOrder = ['free', 'plus', 'plus_trial', 'ultra'] as const;
   const tierLocked = tierOrder.indexOf(userTier) < tierOrder.indexOf(item.tier_required);
+
+  const handleUpgrade = () => {
+    router.push(`/pricing?highlight=${item.tier_required}`);
+  };
 
   return (
     <Card>
@@ -50,13 +57,24 @@ export function ShopItemCard({ item, userCoins, userTier, onPurchase, isPurchasi
           )}
           <div className="flex items-center justify-between">
             <div className="text-lg font-bold text-yellow-700">{item.price_coins} coins</div>
-            <Button
-              disabled={isPurchasing || insufficientCoins || tierLocked}
-              onClick={() => onPurchase(item.id)}
-              className="bg-crave-orange hover:bg-crave-orange-dark"
-            >
-              {tierLocked ? 'Tier Locked' : insufficientCoins ? 'Insufficient Coins' : isPurchasing ? 'Purchasing...' : 'Purchase'}
-            </Button>
+            {tierLocked ? (
+              <Button
+                onClick={handleUpgrade}
+                variant="outline"
+                className="border-crave-orange text-crave-orange hover:bg-crave-orange hover:text-white"
+              >
+                Upgrade to {item.tier_required.charAt(0).toUpperCase() + item.tier_required.slice(1)}
+                <ArrowUpRight className="h-4 w-4 ml-1" />
+              </Button>
+            ) : (
+              <Button
+                disabled={isPurchasing || insufficientCoins}
+                onClick={() => onPurchase(item.id)}
+                className="bg-crave-orange hover:bg-crave-orange-dark"
+              >
+                {insufficientCoins ? 'Insufficient Coins' : isPurchasing ? 'Purchasing...' : 'Purchase'}
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>

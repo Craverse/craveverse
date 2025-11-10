@@ -1,12 +1,12 @@
 // API health check endpoint
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { testDatabaseConnection } from '@/lib/supabase-client';
 import { createLogger, createTraceId } from '@/lib/logger';
 import { isMockMode } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const traceId = createTraceId();
   const logger = createLogger('health-check', traceId);
   

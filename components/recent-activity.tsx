@@ -1,6 +1,5 @@
 // Recent activity component
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { 
   Target, 
   Trophy, 

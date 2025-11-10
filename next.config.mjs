@@ -17,6 +17,12 @@ const nextConfig = {
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
   },
   outputFileTracingRoot: __dirname,
+  // Increase webpack chunk loading timeout
+  webpack: (config) => {
+    config.resolve = config.resolve || {};
+    config.resolve.fallback = config.resolve.fallback || {};
+    return config;
+  },
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production',
   },

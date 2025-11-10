@@ -6,20 +6,44 @@ import { createOpenAIClient } from '../../../../lib/openai-client';
 import { CONFIG } from '../../../../lib/config';
 import { createLogger, getTraceIdFromHeaders, createTraceId } from '@/lib/logger';
 import { isMockMode } from '@/lib/utils';
+import { updateStreakWithPause } from '@/lib/streak-utils';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   const traceId = getTraceIdFromHeaders(request.headers) || createTraceId();
   const logger = createLogger('levels-complete', traceId);
+  const recordJourneyEvent = async (
+    userId: string,
+    event: string,
+    data: {
+      success?: boolean;
+      durationMs?: number;
+      metadata?: Record<string, unknown>;
+    } = {},
+  ) => {
+    try {
+      await supabaseServer.from('journey_events').insert({
+        user_id: userId,
+        event,
+        success: data.success ?? null,
+        duration_ms: data.durationMs ?? null,
+        metadata: data.metadata ?? {},
+      });
+    } catch (telemetryError) {
+      logger.warn('Level telemetry insert failed', {
+        error: telemetryError instanceof Error ? telemetryError.message : 'unknown',
+      });
+    }
+  };
   
   try {
     logger.info('Level completion request received');
 
     // Mock mode short-circuit
     if (isMockMode()) {
-      const { levelId, userResponse } = await request.json();
-      if (!levelId || !userResponse) {
+      const { levelId, userResponse, completionNotes } = await request.json();
+      if (!levelId || !(userResponse || completionNotes)) {
         return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
       }
       logger.info('Mock mode: returning mocked completion response');
@@ -38,9 +62,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { levelId, userResponse } = await request.json();
+    const requestStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const { levelId, userResponse, completionNotes } = await request.json();
 
-    if (!levelId || !userResponse) {
+    if (!levelId || !(userResponse || completionNotes)) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
@@ -138,10 +163,11 @@ export async function POST(request: NextRequest) {
         level_id: levelId,
         completed_at: new Date().toISOString(),
         ai_feedback: aiFeedback,
-        user_response: userResponse,
+        user_response: userResponse || completionNotes || '',
         metadata: {
           completion_time: new Date().toISOString(),
           user_tier: userProfile.subscription_tier,
+          completion_notes: completionNotes,
         },
       });
 
@@ -153,14 +179,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Award XP and coins
+    // Award XP and coins, and increment streak (using function for consistency)
+    try {
+      await updateStreakWithPause(userProfile.id, true);
+    } catch (streakError) {
+      logger.warn('Error updating streak with pause protection', { error: streakError instanceof Error ? streakError.message : 'Unknown error' });
+    }
+
     const { error: rewardError } = await supabaseServer
       .from('users')
       .update({
         xp: userProfile.xp + level.xp_reward,
         cravecoins: userProfile.cravecoins + level.coin_reward,
         current_level: Math.max(userProfile.current_level, level.level_number + 1),
-        streak_count: userProfile.streak_count + 1,
         updated_at: new Date().toISOString(),
       })
       .eq('id', userProfile.id);
@@ -194,6 +225,17 @@ export async function POST(request: NextRequest) {
       logger.warn('Error logging activity', { error: logError });
     }
 
+    const duration = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - requestStart;
+    await recordJourneyEvent(userProfile.id, 'level_complete_server', {
+      success: true,
+      durationMs: duration,
+      metadata: {
+        levelId,
+        levelNumber: level.level_number,
+        xpReward: level.xp_reward,
+        coinReward: level.coin_reward,
+      },
+    });
     return NextResponse.json({
       success: true,
       aiFeedback,

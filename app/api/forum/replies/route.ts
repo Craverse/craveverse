@@ -50,6 +50,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
+    if (userProfile.subscription_tier === 'free') {
+      return NextResponse.json(
+        { error: 'Replies are reserved for Plus members. Visit /pricing to upgrade.' },
+        { status: 403 }
+      );
+    }
+
     // Check if thread exists
     const { data: thread, error: threadError } = await supabase
       .from('forum_posts')

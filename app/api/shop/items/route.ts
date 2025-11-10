@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { createLogger, createTraceId } from '@/lib/logger';
 import { isMockMode } from '@/lib/utils';
 import { supabaseServer } from '@/lib/supabase-client';
@@ -61,7 +61,7 @@ function getMockItems(): ShopItem[] {
   ];
 }
 
-export async function GET(_request: NextRequest) {
+export async function GET() {
   const traceId = createTraceId();
   const logger = createLogger('shop-items', traceId);
 

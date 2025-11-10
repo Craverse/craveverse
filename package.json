@@ -37,9 +37,10 @@
     "dev:both:win": "npm run dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "lint:fix": "next lint --fix",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
     "type-check": "tsc --noEmit",
+    "test": "tsx --test tests/api/onboarding-complete.test.ts tests/api/analytics-interaction.test.ts tests/integration/mitigation-events.test.ts",
     "clean": "rm -rf .next node_modules package-lock.json",
     "clean:win": "rmdir /s /q .next node_modules & del package-lock.json",
     "fresh-install": "npm ci",
@@ -52,6 +53,7 @@
     "prebuild": "npm run type-check",
     "postbuild": "echo 'Build completed successfully'",
     "dev:clean": "npm run clean:win && npm install && npm run dev",
+    "fix:permissions": "powershell -ExecutionPolicy Bypass -File scripts\\fix-permissions.ps1",
     "build:analyze": "ANALYZE=true npm run build",
     "check:deps": "npm outdated",
     "update:deps": "npm update",
@@ -134,6 +136,7 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "postcss": "^8.5.6",
     "typescript": "^5.9.3",
-    "@types/uuid": "^10.0.0"
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.2"
   }
 }

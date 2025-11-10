@@ -9,7 +9,7 @@ import { useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Flame, Share2, Download, Trophy, Target, TrendingUp, Star } from 'lucide-react';
+import { Share2, Download, Trophy, TrendingUp, Star } from 'lucide-react';
 import { useUserContext } from '@/contexts/user-context';
 import { ShareModal } from '@/components/progress/share-modal';
 import { ProgressChart } from '@/components/progress/progress-chart';
@@ -65,7 +65,6 @@ export default function ProgressPage() {
   const [progressData, setProgressData] = useState<ProgressData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [shareUrl, setShareUrl] = useState('');
 
   const isCurrentUser = useMemo(() => {
     if (!slug) return false;
@@ -120,7 +119,7 @@ export default function ProgressPage() {
             setProgressData(null);
           }
         }
-      } catch (error) {
+      } catch {
         setProgressData(null);
       } finally {
         setIsLoading(false);
@@ -302,7 +301,6 @@ export default function ProgressPage() {
         <ShareModal
           open={showShareModal}
           onOpenChange={setShowShareModal}
-          onShare={setShareUrl}
         />
       )}
     </div>

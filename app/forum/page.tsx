@@ -4,22 +4,19 @@
 // Force dynamic rendering for auth-protected page
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AuthGuard } from '@/components/auth-guard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  MessageSquare, 
-  Plus, 
-  Search, 
-  Filter,
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  MessageSquare,
+  Plus,
+  Search,
   TrendingUp,
-  Clock,
   Users,
-  Flame
+  Flame,
 } from 'lucide-react';
 import { ThreadList } from '../../components/forum/thread-list';
 import { CreateThreadModal } from '../../components/forum/create-thread-modal';
@@ -49,24 +46,42 @@ export default function ForumPage() {
   const [sortBy, setSortBy] = useState('recent');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
-  useEffect(() => {
-    fetchThreads();
-  }, [selectedCraving, sortBy]);
-
-  const fetchThreads = async () => {
+  const fetchThreads = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/forum/threads?craving=${selectedCraving}&sort=${sortBy}`);
+      // Add timeout with AbortController
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch(`/api/forum/threads?craving=${selectedCraving}&sort=${sortBy}`, {
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
       if (response.ok) {
         const data = await response.json();
-        setThreads(data.threads);
+        setThreads(data.threads || []);
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to load threads' }));
+        logger.error('Error fetching threads', { error: errorData.error });
+        // Silently handle forum errors - don't show toast for every filter change
       }
     } catch (error) {
-      logger.error('Error fetching threads', { error: error instanceof Error ? error.message : 'Unknown error' });
+      if (error instanceof Error && error.name === 'AbortError') {
+        logger.warn('Threads fetch timeout');
+      } else {
+        logger.error('Error fetching threads', { error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+      // Silently handle forum errors - don't show toast for every filter change
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [logger, selectedCraving, sortBy]);
+
+  useEffect(() => {
+    fetchThreads();
+  }, [fetchThreads]);
 
   const handleThreadCreated = () => {
     fetchThreads();

@@ -126,8 +126,8 @@ lib/
 
 4. **Set up Supabase**
    - Create a new Supabase project
-   - Run the database schema from `database/complete-schema.sql`
-   - Configure Row Level Security policies
+   - Run the schema in `database/craveverse-complete-schema.sql` (includes tables, indexes, RLS, functions, triggers)
+   - Verify Row Level Security policies are enabled after import
    - Set up storage buckets
 
 5. **Set up Clerk**
@@ -161,8 +161,11 @@ The application uses Supabase with the following key tables:
 - **forum_replies**: Thread responses
 - **user_progress**: Progress tracking
 - **subscriptions**: Stripe subscription data
+- **user_quiz_responses**: Persisted onboarding answers and derived preferences
+- **button_interactions**: Aggregated per-page/button click counts for UX analytics
+- **journey_events**: Time-series telemetry for onboarding, level flow, and latency diagnostics
 
-Run the complete schema from `database/complete-schema.sql` to set up all tables, relationships, and security policies.
+Run the complete schema from `database/craveverse-complete-schema.sql` to set up all tables, relationships, RLS policies, helper functions, and rewards-related triggers.
 
 ## 🎮 Core Features
 
@@ -189,6 +192,12 @@ Run the complete schema from `database/complete-schema.sql` to set up all tables
 - Smart reply suggestions
 - Progress insights
 - Motivational messages
+
+### Personalized Onboarding Quiz
+- Runs immediately after sign-up to gather craving context
+- Stores responses in `user_quiz_responses` and updates user preferences
+- Marks users as no longer newbies so the dashboard unlocks instantly
+- Feeds tailored themes, streak helpers, and battle recommendations
 
 ## 🔧 Configuration
 
@@ -224,6 +233,16 @@ Run the complete schema from `database/complete-schema.sql` to set up all tables
 ## 🚀 Deployment
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed Vercel deployment instructions.
+
+## ✅ Testing & QA
+
+- `npm run type-check` – TypeScript correctness
+- `npm run lint` – ESLint (existing warnings documented in `TEST_RESULTS.md`)
+- `npm run test` – Type-safe Node.js test runner (tsx + node:test)
+- `npx playwright test` – End-to-end smoke (once Playwright suite is finalized)
+- PowerShell harnesses (`scripts/test-all.ps1`, `scripts/test-rewards-api.ps1`) for Windows regression
+- Manual regression checklist: see `TEST_PLAN.md`
+- Latest automation log: `TEST_RESULTS.md`
 
 ## 🧪 Development Scripts
 

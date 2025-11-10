@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 // Root layout for the application
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
@@ -36,6 +37,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <link rel="icon" href="data:," />
+      </head>
       <body className={inter.className}>
         <Providers>
           <AppShell>

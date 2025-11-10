@@ -1,9 +1,8 @@
 // Dashboard stats component
 'use client';
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { Badge } from '@/components/ui/badge';
 import { Flame, Target, TrendingUp, Coins } from 'lucide-react';
 
 interface DashboardStatsProps {

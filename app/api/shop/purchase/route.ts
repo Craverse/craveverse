@@ -84,10 +84,130 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Purchase recorded with issues' }, { status: 500 });
     }
 
-    // TODO: Apply effects (pause tokens, level skip) via follow-up job if needed
+    // Apply effects based on item type
+    const effects = item.effects || {};
+    const hasPauseDays = 'pause_days' in effects;
+    const hasLevelSkip = 'level_skip' in effects;
+    const hasTheme = 'theme' in effects;
+    const inventoryItemIds: string[] = [];
+
+    // Check shop item type to determine if it's consumable/utility or cosmetic
+    const { data: shopItem } = await supabaseServer
+      .from('shop_items')
+      .select('type')
+      .eq('id', item.id)
+      .single();
+    
+    const isConsumableOrUtility = shopItem?.type === 'consumable' || shopItem?.type === 'utility';
+    const isCosmetic = shopItem?.type === 'cosmetic';
+
+    if (isConsumableOrUtility && (hasPauseDays || hasLevelSkip)) {
+      // For consumables/utilities: Add to user_inventory (don't activate yet)
+      const { data: existingInventory, error: inventoryCheckError } = await supabaseServer
+        .from('user_inventory')
+        .select('id, quantity')
+        .eq('user_id', user.id)
+        .eq('item_id', item.id)
+        .single();
+
+      if (inventoryCheckError && inventoryCheckError.code !== 'PGRST116') {
+        logger.warn('Error checking inventory', { error: inventoryCheckError.message });
+      }
+
+      if (existingInventory) {
+        // Update existing inventory entry
+        const { data: updatedInventory, error: updateInventoryError } = await supabaseServer
+          .from('user_inventory')
+          .update({ quantity: existingInventory.quantity + quantity })
+          .eq('id', existingInventory.id)
+          .select('id')
+          .single();
+        
+        if (updateInventoryError) {
+          logger.error('Failed to update inventory', { error: updateInventoryError.message });
+        } else if (updatedInventory) {
+          inventoryItemIds.push(updatedInventory.id);
+        }
+      } else {
+        // Create new inventory entry
+        const { data: newInventory, error: insertInventoryError } = await supabaseServer
+          .from('user_inventory')
+          .insert({ 
+            user_id: user.id, 
+            item_id: item.id, 
+            quantity 
+          })
+          .select('id')
+          .single();
+        
+        if (insertInventoryError) {
+          logger.error('Failed to add to inventory', { error: insertInventoryError.message });
+        } else if (newInventory) {
+          inventoryItemIds.push(newInventory.id);
+        }
+      }
+    } else if (isCosmetic && hasTheme) {
+      // For cosmetic themes: Unlock immediately in user_themes with personalization
+      const themeId = item.effects?.theme || 'premium';
+      
+      // Fetch user profile for personalization
+      const { data: userProfile, error: profileError } = await supabaseServer
+        .from('users')
+        .select('primary_craving, current_level, streak_count, xp, preferences')
+        .eq('id', user.id)
+        .single();
+      
+      let themeData = {};
+      if (!profileError && userProfile) {
+        // Import personalization function (dynamic import to avoid circular deps)
+        try {
+          const { generateThemePersonalization } = await import('@/lib/theme-personalization');
+          themeData = generateThemePersonalization({
+            primary_craving: userProfile.primary_craving,
+            current_level: userProfile.current_level,
+            streak_count: userProfile.streak_count,
+            xp: userProfile.xp,
+            preferences: userProfile.preferences || {},
+          }, themeId);
+        } catch (importError) {
+          logger.warn('Failed to generate theme personalization', { error: importError instanceof Error ? importError.message : 'Unknown' });
+        }
+      }
+      
+      const { data: newTheme, error: themeError } = await supabaseServer
+        .from('user_themes')
+        .insert({ 
+          user_id: user.id, 
+          theme_id: themeId,
+          theme_data: themeData
+        })
+        .select('id')
+        .single();
+      
+      if (themeError) {
+        // If theme already exists, that's fine (idempotent)
+        if (themeError.code !== '23505') { // Not a unique constraint violation
+          logger.error('Failed to unlock theme', { error: themeError.message });
+        }
+      } else if (newTheme) {
+        inventoryItemIds.push(newTheme.id);
+      }
+    }
+
+    logger.info('Purchase completed', { 
+      userId: user.id, 
+      itemId: item.id, 
+      quantity, 
+      inventoryItemIds 
+    });
 
     return NextResponse.json(
-      { success: true, newBalance: user.cravecoins - totalCost, mockUsed: false },
+      { 
+        success: true, 
+        newBalance: user.cravecoins - totalCost, 
+        mockUsed: false,
+        inventoryItemIds 
+      },
       { headers: { 'x-trace-id': traceId } }
     );
   } catch (err) {

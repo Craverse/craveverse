@@ -1,19 +1,16 @@
 // Landing page
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@clerk/nextjs';
 import { useUserContext } from '@/contexts/user-context';
-import { Button } from '@/components/ui/button';
-import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { 
   ArrowRight, 
   Star, 
   Zap, 
-  Crown,
   Target,
   Users,
   Trophy,
@@ -22,32 +19,47 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { isMockMode } from '@/lib/utils';
+import { trackJourneyEvent } from '@/lib/telemetry';
 
 // Note: Lazy loading components can be implemented when needed
 
 export default function LandingPage() {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
   const mock = isMockMode();
   const { user: clerkUser, isLoaded: clerkLoaded } = useUser();
-  const { userProfile, isLoading: profileLoading, isOnboardingComplete } = useUserContext();
+  const { isLoading: profileLoading, isOnboardingComplete } = useUserContext();
 
   // Redirect authenticated users away from landing page
+  // Only redirect if user is fully loaded and authenticated - don't interfere with navigation
   useEffect(() => {
     if (mock) return; // Skip in mock mode
     
-    if (clerkLoaded && clerkUser) {
-      // User is authenticated - check onboarding status
-      if (!profileLoading) {
+    // Only redirect if user is authenticated AND hasn't clicked a button recently
+    // Check if user recently navigated away (button click)
+    const hasNavigated = sessionStorage.getItem('landing_navigation');
+    if (hasNavigated) {
+      sessionStorage.removeItem('landing_navigation');
+      return; // Don't redirect if user just clicked a button
+    }
+    
+    // Shorter delay for faster redirects - only redirect if user hasn't interacted
+    const redirectTimer = setTimeout(() => {
+      // Double-check that user hasn't navigated away
+      const stillNavigating = sessionStorage.getItem('landing_navigation');
+      if (stillNavigating) {
+        return; // User is navigating, don't redirect
+      }
+      
+      if (clerkLoaded && clerkUser && !profileLoading) {
         if (isOnboardingComplete) {
-          // Redirect to dashboard if onboarding complete
           router.push('/dashboard');
         } else {
-          // Redirect to onboarding if incomplete
           router.push('/onboarding');
         }
       }
-    }
+    }, 1000); // 1 second delay - faster redirects
+
+    return () => clearTimeout(redirectTimer);
   }, [clerkLoaded, clerkUser, profileLoading, isOnboardingComplete, mock, router]);
 
   const features = [
@@ -112,28 +124,51 @@ export default function LandingPage() {
   ];
 
   const handleGetStarted = (e?: React.MouseEvent) => {
-    e?.preventDefault();
-    e?.stopPropagation();
-    
-    try {
-      setIsLoading(true);
-      
-      // Set auth intent flag so Clerk loads on next navigation
-      if (typeof window !== 'undefined' && !mock) {
-        sessionStorage.setItem('authIntent', 'true');
-      }
-      
-      // Use window.location for immediate navigation
-      window.location.href = '/sign-up';
-    } catch (error) {
-      // Fallback to router
-      setIsLoading(false);
-      router.push('/sign-up');
+    // Prevent any default behavior
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
     }
+    
+    // Mark that user is navigating away to prevent redirect interference
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('landing_navigation', 'true');
+      
+      // Use window.location for immediate, reliable navigation
+      // Add small delay to ensure sessionStorage is set
+      setTimeout(() => {
+        window.location.href = '/sign-up';
+      }, 10);
+    }
+    trackJourneyEvent('landing_navigation', {
+      metadata: { target: '/sign-up' },
+    });
+  };
+
+  const handleViewPricing = (e?: React.MouseEvent) => {
+    // Prevent any default behavior
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    // Mark that user is navigating away to prevent redirect interference
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('landing_navigation', 'true');
+      
+      // Use window.location for immediate, reliable navigation
+      // Add small delay to ensure sessionStorage is set
+      setTimeout(() => {
+        window.location.href = '/pricing';
+      }, 10);
+    }
+    trackJourneyEvent('landing_navigation', {
+      metadata: { target: '/pricing' },
+    });
   };
 
   return (
-    <div className="min-h-screen bg-background" style={{ position: 'relative', zIndex: 1 }}>
+    <div className="min-h-screen bg-background">
       {/* Hero Section */}
       <section className="relative overflow-hidden">
         <div className="container mx-auto px-4 py-20">
@@ -155,44 +190,25 @@ export default function LandingPage() {
               Join a supportive community and prove your strength in 1v1 battles.
             </p>
             
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button 
+            <div className="flex flex-col sm:flex-row gap-4 justify-center" style={{ position: 'relative', zIndex: 100 }}>
+              <button
                 type="button"
-                size="lg" 
-                onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleGetStarted(e);
-                }}
-                disabled={isLoading}
-                className="bg-crave-orange hover:bg-crave-orange-dark text-white px-8 py-4 text-lg cursor-pointer"
-                style={{ pointerEvents: isLoading ? 'none' : 'auto' }}
+                onClick={handleGetStarted}
+                className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium bg-crave-orange hover:bg-crave-orange-dark text-white px-8 py-4 text-lg h-11 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer"
+                style={{ position: 'relative', zIndex: 101, pointerEvents: 'auto' }}
               >
-                {isLoading ? (
-                  <div className="flex items-center space-x-2">
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    <span>Loading...</span>
-                  </div>
-                ) : (
-                  <>
-                    Start Your Journey
-                    <ArrowRight className="h-5 w-5 ml-2" />
-                  </>
-                )}
-              </Button>
+                Start Your Journey
+                <ArrowRight className="h-5 w-5 ml-2" />
+              </button>
               
-              <Button 
-                size="lg" 
-                variant="outline"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  window.location.href = '/pricing';
-                }}
-                className="px-8 py-4 text-lg"
+              <button
+                type="button"
+                onClick={handleViewPricing}
+                className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium border border-input bg-background hover:bg-accent hover:text-accent-foreground px-8 py-4 text-lg h-11 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer"
+                style={{ position: 'relative', zIndex: 101, pointerEvents: 'auto' }}
               >
                 View Pricing
-              </Button>
+              </button>
             </div>
           </div>
         </div>
@@ -290,44 +306,25 @@ export default function LandingPage() {
                 Join thousands of people who have already broken free from their cravings. 
                 Your journey starts with a single step.
               </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Button 
+              <div className="flex flex-col sm:flex-row gap-4 justify-center" style={{ position: 'relative', zIndex: 100 }}>
+                <button
                   type="button"
-                  size="lg" 
-                  onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleGetStarted(e);
-                  }}
-                  disabled={isLoading}
-                  className="bg-crave-orange hover:bg-crave-orange-dark text-white px-8 py-4 text-lg cursor-pointer z-50 relative"
-                  style={{ pointerEvents: isLoading ? 'none' : 'auto' }}
+                  onClick={handleGetStarted}
+                  className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium bg-crave-orange hover:bg-crave-orange-dark text-white px-8 py-4 text-lg h-11 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer"
+                  style={{ position: 'relative', zIndex: 101, pointerEvents: 'auto' }}
                 >
-                  {isLoading ? (
-                    <div className="flex items-center space-x-2">
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                      <span>Loading...</span>
-                    </div>
-                  ) : (
-                    <>
-                      Start Free Trial
-                      <ArrowRight className="h-5 w-5 ml-2" />
-                    </>
-                  )}
-                </Button>
+                  Start Free Trial
+                  <ArrowRight className="h-5 w-5 ml-2" />
+                </button>
                 
-                <Button 
-                  size="lg" 
-                  variant="outline"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    window.location.href = '/pricing';
-                  }}
-                  className="px-8 py-4 text-lg"
+                <button
+                  type="button"
+                  onClick={handleViewPricing}
+                  className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium border border-input bg-background hover:bg-accent hover:text-accent-foreground px-8 py-4 text-lg h-11 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer"
+                  style={{ position: 'relative', zIndex: 101, pointerEvents: 'auto' }}
                 >
                   View All Plans
-                </Button>
+                </button>
               </div>
               
               <div className="mt-6 text-sm text-muted-foreground">

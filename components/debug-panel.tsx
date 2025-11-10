@@ -1,7 +1,7 @@
 // Debug panel component for development and troubleshooting
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 // import { useUser } from '@clerk/nextjs'; // BYPASSED FOR MOCK MODE
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';

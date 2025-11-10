@@ -4,15 +4,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { 
-  Sword, 
-  Trophy, 
-  Clock, 
+import {
+  Sword,
+  Trophy,
+  Clock,
   Target,
   Users,
   Zap,
   Crown,
-  Star
 } from 'lucide-react';
 
 interface Battle {
@@ -31,7 +30,7 @@ interface Battle {
 
 interface BattleCardProps {
   battle: Battle;
-  onBattleUpdate: () => void;
+  onBattleUpdate?: () => void;
 }
 
 export function BattleCard({ battle, onBattleUpdate }: BattleCardProps) {
@@ -93,6 +92,10 @@ export function BattleCard({ battle, onBattleUpdate }: BattleCardProps) {
   };
 
   const { user1Progress, user2Progress } = getProgressPercentage();
+
+  const handleRefresh = () => {
+    onBattleUpdate?.();
+  };
 
   return (
     <Card className="hover:shadow-lg transition-shadow">
@@ -177,19 +180,32 @@ export function BattleCard({ battle, onBattleUpdate }: BattleCardProps) {
         {/* Action Buttons */}
         <div className="flex space-x-2 pt-2">
           {battle.status === 'waiting' && (
-            <Button size="sm" className="flex-1 bg-crave-orange hover:bg-crave-orange-dark">
+            <Button
+              size="sm"
+              className="flex-1 bg-crave-orange hover:bg-crave-orange-dark"
+              onClick={handleRefresh}
+            >
               <Sword className="h-4 w-4 mr-1" />
               Join Battle
             </Button>
           )}
           {battle.status === 'active' && (
-            <Button size="sm" className="flex-1 bg-green-600 hover:bg-green-700">
+            <Button
+              size="sm"
+              className="flex-1 bg-green-600 hover:bg-green-700"
+              onClick={handleRefresh}
+            >
               <Target className="h-4 w-4 mr-1" />
               View Progress
             </Button>
           )}
           {battle.status === 'completed' && (
-            <Button size="sm" variant="outline" className="flex-1">
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              onClick={handleRefresh}
+            >
               <Trophy className="h-4 w-4 mr-1" />
               View Results
             </Button>

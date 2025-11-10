@@ -10,6 +10,14 @@ export function cn(...inputs: ClassValue[]) {
  * Returns true if we should use mock mode (no real API calls)
  */
 export function isMockMode(): boolean {
+  // Explicit overrides come first
+  if (process.env.NEXT_PUBLIC_FORCE_MOCK_MODE === 'true') {
+    return true;
+  }
+  if (process.env.NEXT_PUBLIC_FORCE_LIVE_MODE === 'true') {
+    return false;
+  }
+
   // Check for Clerk keys
   const clerkPubKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const clerkSecretKey = process.env.CLERK_SECRET_KEY;
@@ -20,24 +28,28 @@ export function isMockMode(): boolean {
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   
   // Mock mode if any critical env vars are missing or placeholder
-  const hasValidClerk = clerkPubKey && 
-    clerkSecretKey && 
-    clerkPubKey.startsWith('pk_') && 
-    clerkSecretKey.startsWith('sk_') &&
-    clerkPubKey.length > 50 && 
-    clerkSecretKey.length > 50 &&
-    !clerkPubKey.includes('placeholder') &&
-    !clerkSecretKey.includes('placeholder');
+  const hasValidClerk = Boolean(
+    clerkPubKey &&
+      clerkSecretKey &&
+      clerkPubKey.startsWith('pk_') &&
+      clerkSecretKey.startsWith('sk_') &&
+      clerkPubKey.length > 20 &&
+      clerkSecretKey.length > 20 &&
+      !clerkPubKey.includes('placeholder') &&
+      !clerkSecretKey.includes('placeholder'),
+  );
     
-  const hasValidSupabase = supabaseUrl && 
-    supabaseAnonKey && 
-    supabaseServiceKey &&
-    supabaseUrl.startsWith('https://') &&
-    supabaseAnonKey.length > 50 &&
-    supabaseServiceKey.length > 50 &&
-    !supabaseUrl.includes('your-project') &&
-    !supabaseAnonKey.includes('placeholder') &&
-    !supabaseServiceKey.includes('placeholder');
+  const hasValidSupabase = Boolean(
+    supabaseUrl &&
+      supabaseAnonKey &&
+      supabaseServiceKey &&
+      supabaseUrl.startsWith('https://') &&
+      supabaseAnonKey.length > 20 &&
+      supabaseServiceKey.length > 20 &&
+      !supabaseUrl.includes('your-project') &&
+      !supabaseAnonKey.includes('placeholder') &&
+      !supabaseServiceKey.includes('placeholder'),
+  );
   
   return !hasValidClerk || !hasValidSupabase;
 }

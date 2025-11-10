@@ -9,15 +9,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  Trophy, 
-  Crown, 
-  Star, 
+import {
+  Trophy,
+  Crown,
+  Star,
   Flame,
   Target,
   Zap,
-  Users,
-  TrendingUp
+  TrendingUp,
 } from 'lucide-react';
 
 interface LeaderboardEntry {

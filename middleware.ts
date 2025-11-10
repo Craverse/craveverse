@@ -61,7 +61,7 @@ export default shouldUseClerk
           } else {
             return NextResponse.redirect(new URL('/onboarding', req.url));
           }
-        } catch (error) {
+        } catch {
           // If check fails, redirect to onboarding (safe default)
           return NextResponse.redirect(new URL('/onboarding', req.url));
         }

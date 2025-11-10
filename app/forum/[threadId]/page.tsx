@@ -4,25 +4,27 @@
 // Force dynamic rendering for auth-protected page
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { 
-  MessageSquare, 
-  ThumbsUp, 
-  Clock, 
+import {
+  MessageSquare,
+  ThumbsUp,
+  Clock,
   User,
   Crown,
   Star,
-  Zap,
   Reply,
-  ArrowLeft
+  ArrowLeft,
+  Zap,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
+import { useUserContext } from '@/contexts/user-context';
 
 interface Thread {
   id: string;
@@ -52,6 +54,7 @@ interface Reply {
 export default function ThreadPage() {
   const params = useParams();
   const threadId = params?.threadId as string;
+  const { userProfile } = useUserContext();
   
   const [thread, setThread] = useState<Thread | null>(null);
   const [replies, setReplies] = useState<Reply[]>([]);
@@ -59,30 +62,49 @@ export default function ThreadPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState('');
+  const canReply = (userProfile?.subscription_tier ?? 'free') !== 'free';
 
-  useEffect(() => {
-    fetchThreadData();
-  }, [threadId]);
-
-  const fetchThreadData = async () => {
+  const fetchThreadData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`/api/forum/threads/${threadId}`);
+      // Add timeout with AbortController
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch(`/api/forum/threads/${threadId}`, {
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
       if (response.ok) {
         const data = await response.json();
         setThread(data.thread);
         setReplies(data.replies);
       }
     } catch (error) {
-      console.error('Error fetching thread data:', error);
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.warn('Thread fetch timeout');
+      } else {
+        console.error('Error fetching thread data:', error);
+      }
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [threadId]);
+
+  useEffect(() => {
+    fetchThreadData();
+  }, [fetchThreadData]);
 
   const handleReplySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!canReply) {
+      toast.info('Upgrade to Plus to join the discussion.');
+      return;
+    }
+
     if (!newReply.trim()) return;
 
     setIsSubmitting(true);
@@ -112,6 +134,10 @@ export default function ThreadPage() {
 
   const handleAISuggestion = async () => {
     if (!thread) return;
+    if (!canReply) {
+      toast.info('AI reply drafting is a Plus feature. Upgrade to unlock.');
+      return;
+    }
 
     try {
       const response = await fetch('/api/forum/suggest-reply', {
@@ -296,12 +322,29 @@ export default function ThreadPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {!canReply && (
+              <div className="mb-4 rounded-lg border border-dashed border-crave-orange/40 bg-crave-orange/5 p-4 text-sm text-orange-700">
+                <p className="mb-3">
+                  Replies are a Plus feature. Upgrade to unlock full community participation.
+                </p>
+                <Button
+                  variant="outline"
+                  className="border-crave-orange text-crave-orange hover:bg-crave-orange hover:text-white"
+                  asChild
+                >
+                  <a href="/pricing?highlight=plus">
+                    Upgrade to Plus
+                  </a>
+                </Button>
+              </div>
+            )}
             <form onSubmit={handleReplySubmit} className="space-y-4">
               <Textarea
                 placeholder="Write your reply..."
                 value={newReply}
                 onChange={(e) => setNewReply(e.target.value)}
                 className="min-h-[100px]"
+                disabled={!canReply}
                 maxLength={1000}
                 required
               />
@@ -317,13 +360,14 @@ export default function ThreadPage() {
                     size="sm"
                     onClick={handleAISuggestion}
                     className="text-xs"
+                    disabled={!canReply}
                   >
                     <Zap className="h-3 w-3 mr-1" />
                     Get AI Help
                   </Button>
                   <Button
                     type="submit"
-                    disabled={!newReply.trim() || isSubmitting}
+                    disabled={!canReply || !newReply.trim() || isSubmitting}
                     className="bg-crave-orange hover:bg-crave-orange-dark"
                   >
                     {isSubmitting ? 'Posting...' : 'Post Reply'}

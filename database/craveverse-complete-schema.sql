@@ -42,6 +42,10 @@ CREATE TABLE users (
   trial_ends_at TIMESTAMP WITH TIME ZONE,
   ai_summary TEXT, -- Max 200 tokens for AI context
   preferences JSONB DEFAULT '{}',
+  plan_id TEXT DEFAULT 'free',
+  last_sign_in_at TIMESTAMP WITH TIME ZONE,
+  is_newbie BOOLEAN DEFAULT TRUE,
+  onboarding_completed_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -187,6 +191,33 @@ CREATE TABLE payment_transactions (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Subscriptions - tracks active plans and trials
+CREATE TABLE subscriptions (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  plan_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'trialing', 'canceled', 'past_due', 'incomplete')),
+  trial_start TIMESTAMP WITH TIME ZONE,
+  trial_end TIMESTAMP WITH TIME ZONE,
+  current_period_start TIMESTAMP WITH TIME ZONE,
+  current_period_end TIMESTAMP WITH TIME ZONE,
+  cancel_at TIMESTAMP WITH TIME ZONE,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Trial history - prevents repeated free trials
+CREATE TABLE trial_history (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  plan_id TEXT NOT NULL,
+  started_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  ended_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Shop items catalog
 CREATE TABLE shop_items (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -211,6 +242,43 @@ CREATE TABLE user_purchases (
   amount_coins INTEGER NOT NULL,
   metadata JSONB DEFAULT '{}',
   purchased_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- User inventory - Store consumable/utility items (pause tokens, level skips)
+CREATE TABLE user_inventory (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  item_id UUID REFERENCES shop_items(id) ON DELETE RESTRICT,
+  quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+  purchased_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  expires_at TIMESTAMP WITH TIME ZONE, -- Nullable for items that don't expire
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(user_id, item_id) -- One inventory entry per user per item type
+);
+
+-- User themes - Store unlocked cosmetic themes per user
+CREATE TABLE user_themes (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  theme_id TEXT NOT NULL, -- e.g., 'premium', 'dark_premium', etc.
+  theme_data JSONB DEFAULT '{}', -- Personalization data (colors, quotes, badges)
+  unlocked_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(user_id, theme_id) -- One unlock per user per theme
+);
+
+-- Streak pauses - Track active pause periods to prevent streak loss
+CREATE TABLE streak_pauses (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  pause_token_id UUID REFERENCES user_inventory(id) ON DELETE SET NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CHECK (end_date >= start_date)
 );
 
 -- Notification preferences
@@ -254,6 +322,60 @@ CREATE TABLE user_settings (
   email_notifications BOOLEAN DEFAULT TRUE,
   push_notifications BOOLEAN DEFAULT TRUE,
   theme_preference TEXT DEFAULT 'system', -- e.g., 'light', 'dark', 'system'
+  active_theme_id TEXT, -- References theme_id from user_themes
+  theme_personalization JSONB DEFAULT '{}', -- User-specific theme customization
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- User onboarding quiz responses (one row per user per quiz version)
+CREATE TABLE user_quiz_responses (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  quiz_version TEXT DEFAULT 'v1',
+  responses JSONB NOT NULL,
+  derived_preferences JSONB DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE (user_id, quiz_version)
+);
+
+-- Aggregated button/page interaction counts
+CREATE TABLE button_interactions (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  page_path TEXT NOT NULL,
+  button_id TEXT NOT NULL,
+  button_text TEXT,
+  click_count INTEGER DEFAULT 0,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE (user_id, page_path, button_id)
+);
+
+-- Journey telemetry events
+CREATE TABLE journey_events (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event TEXT NOT NULL,
+  phase TEXT,
+  duration_ms INTEGER,
+  success BOOLEAN,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Activity log - unified user action feed
+CREATE TABLE activity_log (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  resource_type TEXT,
+  resource_id TEXT,
+  feature TEXT,
   metadata JSONB DEFAULT '{}',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -275,6 +397,9 @@ CREATE INDEX idx_users_clerk_user_id ON users(clerk_user_id);
 CREATE INDEX idx_users_subscription_tier ON users(subscription_tier);
 CREATE INDEX idx_users_primary_craving ON users(primary_craving);
 CREATE INDEX idx_users_streak_count ON users(streak_count);
+CREATE INDEX idx_users_is_newbie ON users(is_newbie);
+CREATE INDEX idx_users_plan_id ON users(plan_id);
+CREATE INDEX idx_users_last_sign_in_at ON users(last_sign_in_at);
 
 CREATE INDEX idx_levels_craving_type ON levels(craving_type);
 CREATE INDEX idx_levels_level_number ON levels(level_number);
@@ -306,8 +431,32 @@ CREATE INDEX idx_queue_jobs_scheduled_at ON queue_jobs(scheduled_at);
 CREATE INDEX idx_shop_items_active ON shop_items(active);
 CREATE INDEX idx_user_purchases_user_id ON user_purchases(user_id);
 CREATE INDEX idx_user_purchases_item_id ON user_purchases(item_id);
+CREATE INDEX idx_user_inventory_user_id ON user_inventory(user_id);
+CREATE INDEX idx_user_inventory_item_id ON user_inventory(item_id);
+CREATE INDEX idx_user_inventory_expires_at ON user_inventory(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX idx_user_themes_user_id ON user_themes(user_id);
+CREATE INDEX idx_user_themes_theme_id ON user_themes(theme_id);
+CREATE INDEX idx_streak_pauses_user_id ON streak_pauses(user_id);
+CREATE INDEX idx_streak_pauses_is_active ON streak_pauses(is_active) WHERE is_active = TRUE;
+CREATE INDEX idx_streak_pauses_dates ON streak_pauses(start_date, end_date);
 CREATE INDEX idx_notification_preferences_user_id ON notification_preferences(user_id);
 CREATE INDEX idx_user_settings_user_id ON user_settings(user_id);
+CREATE INDEX idx_user_quiz_responses_user_id ON user_quiz_responses(user_id);
+CREATE INDEX idx_button_interactions_user_id ON button_interactions(user_id);
+CREATE INDEX idx_button_interactions_page_path ON button_interactions(page_path);
+CREATE INDEX idx_button_interactions_button_id ON button_interactions(button_id);
+CREATE INDEX idx_journey_events_user_id ON journey_events(user_id);
+CREATE INDEX idx_journey_events_event ON journey_events(event);
+CREATE INDEX idx_journey_events_created_at ON journey_events(created_at);
+CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
+CREATE INDEX idx_subscriptions_status ON subscriptions(status);
+CREATE INDEX idx_subscriptions_plan_id ON subscriptions(plan_id);
+CREATE INDEX idx_subscriptions_trial_end ON subscriptions(trial_end);
+CREATE INDEX idx_trial_history_user_id ON trial_history(user_id);
+CREATE INDEX idx_trial_history_plan_id ON trial_history(plan_id);
+CREATE INDEX idx_activity_log_user_id ON activity_log(user_id);
+CREATE INDEX idx_activity_log_action ON activity_log(action);
+CREATE INDEX idx_activity_log_created_at ON activity_log(created_at);
 CREATE INDEX idx_level_map_data_level_id ON level_map_data(level_id);
 
 -- Create updated_at trigger function
@@ -341,6 +490,30 @@ CREATE TRIGGER update_shop_items_updated_at BEFORE UPDATE ON shop_items
 CREATE TRIGGER update_level_map_data_updated_at BEFORE UPDATE ON level_map_data
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER update_user_inventory_updated_at BEFORE UPDATE ON user_inventory
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_streak_pauses_updated_at BEFORE UPDATE ON streak_pauses
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_user_quiz_responses_updated_at BEFORE UPDATE ON user_quiz_responses
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_button_interactions_updated_at BEFORE UPDATE ON button_interactions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_journey_events_updated_at BEFORE UPDATE ON journey_events
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_subscriptions_updated_at BEFORE UPDATE ON subscriptions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_trial_history_updated_at BEFORE UPDATE ON trial_history
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_activity_log_updated_at BEFORE UPDATE ON activity_log
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_progress ENABLE ROW LEVEL SECURITY;
@@ -355,7 +528,16 @@ ALTER TABLE shop_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_purchases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_quiz_responses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE button_interactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE journey_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE level_map_data ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_inventory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_themes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE streak_pauses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trial_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activity_log ENABLE ROW LEVEL SECURITY;
 
 -- Create RLS policies for users
 CREATE POLICY "Users can view their own profile" ON users
@@ -462,9 +644,88 @@ CREATE POLICY "Users can update their own settings" ON user_settings
 CREATE POLICY "Users can insert their own settings" ON user_settings
     FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
 
+-- RLS for user_quiz_responses
+CREATE POLICY "Users can view their own quiz responses" ON user_quiz_responses
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can upsert their own quiz responses" ON user_quiz_responses
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can update their own quiz responses" ON user_quiz_responses
+    FOR UPDATE USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+-- RLS for button_interactions
+CREATE POLICY "Users can view their own button interactions" ON button_interactions
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can insert their own button interactions" ON button_interactions
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can update their own button interactions" ON button_interactions
+    FOR UPDATE USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+-- RLS for journey_events
+CREATE POLICY "Users can view their own journey events" ON journey_events
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can insert their own journey events" ON journey_events
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can update their own journey events" ON journey_events
+    FOR UPDATE USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
 -- RLS for level_map_data (read-only public)
 CREATE POLICY "Allow public read access to level_map_data" ON level_map_data
     FOR SELECT USING (true);
+
+-- RLS for user_inventory
+CREATE POLICY "Users can view their own inventory" ON user_inventory
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can update their own inventory" ON user_inventory
+    FOR UPDATE USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can insert their own inventory" ON user_inventory
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+-- RLS for user_themes
+CREATE POLICY "Users can view their own themes" ON user_themes
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can insert their own themes" ON user_themes
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+-- RLS for streak_pauses
+CREATE POLICY "Users can view their own streak pauses" ON streak_pauses
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can insert their own streak pauses" ON streak_pauses
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can update their own streak pauses" ON streak_pauses
+    FOR UPDATE USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+-- RLS for subscriptions
+CREATE POLICY "Users can view their own subscriptions" ON subscriptions
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can manage their own subscriptions" ON subscriptions
+    FOR ALL USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text))
+    WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+-- RLS for trial_history
+CREATE POLICY "Users can view their own trial history" ON trial_history
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can insert their own trial history" ON trial_history
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+-- RLS for activity_log
+CREATE POLICY "Users can view their own activity" ON activity_log
+    FOR SELECT USING (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
+
+CREATE POLICY "Users can insert their own activity logs" ON activity_log
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM users WHERE clerk_user_id = auth.uid()::text));
 
 -- Insert craving types (seed data)
 INSERT INTO cravings (type, name, description, icon, color) VALUES
@@ -544,20 +805,36 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Function to update streak
+-- Function to update streak (with pause period protection)
 CREATE OR REPLACE FUNCTION update_streak(user_id_param UUID, increment BOOLEAN DEFAULT TRUE)
 RETURNS VOID AS $$
+DECLARE
+    is_paused BOOLEAN;
+    today_date DATE := CURRENT_DATE;
 BEGIN
     IF increment THEN
+        -- Always allow incrementing (completing levels)
         UPDATE users 
         SET streak_count = streak_count + 1,
             updated_at = NOW()
         WHERE id = user_id_param;
     ELSE
-        UPDATE users 
-        SET streak_count = 0,
-            updated_at = NOW()
-        WHERE id = user_id_param;
+        -- Check for active pause period before resetting
+        SELECT EXISTS (
+            SELECT 1 FROM streak_pauses
+            WHERE user_id = user_id_param
+            AND is_active = TRUE
+            AND start_date <= today_date
+            AND end_date >= today_date
+        ) INTO is_paused;
+        
+        -- Only reset if NOT paused
+        IF NOT is_paused THEN
+            UPDATE users 
+            SET streak_count = 0,
+                updated_at = NOW()
+            WHERE id = user_id_param;
+        END IF;
     END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -584,6 +861,29 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Create views for common queries
+
+-- View aligning legacy metrics queries with payment transactions
+CREATE VIEW transactions AS
+SELECT 
+    id,
+    user_id,
+    (amount_cents::numeric / 100) AS amount,
+    status,
+    product_type AS type,
+    created_at
+FROM payment_transactions;
+
+-- View aligning legacy AI usage metrics
+CREATE VIEW ai_usage_log AS
+SELECT 
+    id,
+    user_id,
+    model_type,
+    tokens_used,
+    cost_usd,
+    created_at,
+    ('model_' || model_type::text) AS feature
+FROM ai_usage_metrics;
 
 -- View for user dashboard data
 CREATE VIEW user_dashboard AS
@@ -647,6 +947,8 @@ GROUP BY fp.id, u.name, u.avatar_url, u.subscription_tier;
 -- WARNING: This will delete ALL data and schema. Use with extreme caution!
 
 -- Drop views
+DROP VIEW IF EXISTS transactions CASCADE;
+DROP VIEW IF EXISTS ai_usage_log CASCADE;
 DROP VIEW IF EXISTS forum_post_details CASCADE;
 DROP VIEW IF EXISTS battle_details CASCADE;
 DROP VIEW IF EXISTS level_details CASCADE;
@@ -664,20 +966,37 @@ DROP FUNCTION IF EXISTS update_updated_at_column();
 DROP TRIGGER IF EXISTS update_level_map_data_updated_at ON level_map_data;
 DROP TRIGGER IF EXISTS update_shop_items_updated_at ON shop_items;
 DROP TRIGGER IF EXISTS update_user_settings_updated_at ON user_settings;
+DROP TRIGGER IF EXISTS update_user_inventory_updated_at ON user_inventory;
+DROP TRIGGER IF EXISTS update_streak_pauses_updated_at ON streak_pauses;
 DROP TRIGGER IF EXISTS update_notification_preferences_updated_at ON notification_preferences;
 DROP TRIGGER IF EXISTS update_pause_tokens_updated_at ON pause_tokens;
 DROP TRIGGER IF EXISTS update_forum_posts_updated_at ON forum_posts;
 DROP TRIGGER IF EXISTS update_users_updated_at ON users;
+DROP TRIGGER IF EXISTS update_journey_events_updated_at ON journey_events;
+DROP TRIGGER IF EXISTS update_user_quiz_responses_updated_at ON user_quiz_responses;
+DROP TRIGGER IF EXISTS update_button_interactions_updated_at ON button_interactions;
+DROP TRIGGER IF EXISTS update_subscriptions_updated_at ON subscriptions;
+DROP TRIGGER IF EXISTS update_trial_history_updated_at ON trial_history;
+DROP TRIGGER IF EXISTS update_activity_log_updated_at ON activity_log;
 
 -- Drop tables (in reverse dependency order)
 DROP TABLE IF EXISTS level_map_data CASCADE;
 DROP TABLE IF EXISTS user_settings CASCADE;
+DROP TABLE IF EXISTS journey_events CASCADE;
+DROP TABLE IF EXISTS user_quiz_responses CASCADE;
+DROP TABLE IF EXISTS button_interactions CASCADE;
 DROP TABLE IF EXISTS admin_users CASCADE;
 DROP TABLE IF EXISTS queue_jobs CASCADE;
 DROP TABLE IF EXISTS notification_preferences CASCADE;
+DROP TABLE IF EXISTS streak_pauses CASCADE;
+DROP TABLE IF EXISTS user_themes CASCADE;
+DROP TABLE IF EXISTS user_inventory CASCADE;
 DROP TABLE IF EXISTS user_purchases CASCADE;
 DROP TABLE IF EXISTS shop_items CASCADE;
 DROP TABLE IF EXISTS payment_transactions CASCADE;
+DROP TABLE IF EXISTS trial_history CASCADE;
+DROP TABLE IF EXISTS subscriptions CASCADE;
+DROP TABLE IF EXISTS activity_log CASCADE;
 DROP TABLE IF EXISTS shareable_progress CASCADE;
 DROP TABLE IF EXISTS ai_usage_metrics CASCADE;
 DROP TABLE IF EXISTS pause_tokens CASCADE;

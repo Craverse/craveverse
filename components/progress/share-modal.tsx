@@ -24,7 +24,7 @@ export function ShareModal({ open, onOpenChange, onShare }: ShareModalProps) {
       setShareUrl(json.url);
       onShare?.(json.url);
       setStatus('idle');
-    } catch (error) {
+    } catch {
       setStatus('error');
     }
   };
