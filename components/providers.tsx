@@ -1,17 +1,15 @@
 'use client';
-
 import React, { ReactNode, useEffect } from 'react';
+import { ClerkProvider } from '@clerk/nextjs';
 import { UserProvider } from '@/contexts/user-context';
 import { AuthGate } from '@/components/auth-gate';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ButtonRegistry } from '@/components/button-registry';
 import { useUserContext } from '@/contexts/user-context';
 import { applyTheme, resetTheme } from '@/lib/theme-application';
-
 interface ProvidersProps {
   children: ReactNode;
 }
-
 /**
  * Client-side providers wrapper
  * Separates client providers from server layout
@@ -21,19 +19,15 @@ interface ProvidersProps {
 function ThemeManager() {
   const { userProfile, isLoading } = useUserContext();
   const userId = userProfile?.id;
-
   useEffect(() => {
     let isCancelled = false;
-
     if (isLoading) {
       return;
     }
-
     if (!userId) {
       resetTheme();
       return;
     }
-
     const loadTheme = async () => {
       try {
         const response = await fetch('/api/user/settings', { cache: 'no-store' });
@@ -53,28 +47,37 @@ function ThemeManager() {
         }
       }
     };
-
     loadTheme();
-
     return () => {
       isCancelled = true;
     };
   }, [userId, isLoading]);
-
   return null;
 }
-
 export function Providers({ children }: ProvidersProps) {
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\n" +
+      "Copy .env.example → .env.local and fill in your Clerk keys from https://dashboard.clerk.com"
+    );
+  }
+
+  if (!process.env.CLERK_SECRET_KEY) {
+    throw new Error("Missing CLERK_SECRET_KEY in .env.local");
+  }
+
   return (
-    <ErrorBoundary>
-      <AuthGate>
-        <UserProvider>
-          <ButtonRegistry>
-            <ThemeManager />
-            {children}
-          </ButtonRegistry>
-        </UserProvider>
-      </AuthGate>
-    </ErrorBoundary>
+    <ClerkProvider publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}>
+      <ErrorBoundary>
+        <AuthGate>
+          <UserProvider>
+            <ButtonRegistry>
+              <ThemeManager />
+              {children}
+            </ButtonRegistry>
+          </UserProvider>
+        </AuthGate>
+      </ErrorBoundary>
+    </ClerkProvider>
   );
 }
