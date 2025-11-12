@@ -83,9 +83,11 @@ export async function GET(request: NextRequest) {
     logger.info('Fetching user profile from database', { userId });
 
     // Fetch user profile from Supabase with timeout
-    const timeoutPromise = new Promise((_, reject) => 
+    const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('Database timeout')), 2000) // Reduced from 5s to 2s
     );
+    
+    const dbStartMs = Date.now();
     
     const queryPromise = supabaseServer
       .from('users')
@@ -94,9 +96,14 @@ export async function GET(request: NextRequest) {
       .single();
     
     const { data: userProfile, error: userError } = await Promise.race([queryPromise, timeoutPromise]) as any;
+    const profileDurationMs = Date.now() - dbStartMs;
     
     if (userError || !userProfile) {
-      logger.warn('User profile not found, falling back to mock', { userId, error: userError?.message });
+      logger.warn('User profile not found, falling back to mock', {
+        userId,
+        error: userError?.message,
+        durationMs: profileDurationMs,
+      });
       
       // Fallback to mock data
       const mockProfile = {
@@ -131,12 +138,17 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    logger.info('User profile found', { userId, primary_craving: userProfile.primary_craving });
+    logger.info('User profile found', {
+      userId,
+      primary_craving: userProfile.primary_craving,
+      durationMs: profileDurationMs,
+    });
 
     // Get current level if user has completed onboarding
     let currentLevel = null;
     if (userProfile.primary_craving) {
       try {
+        const levelStartMs = Date.now();
         const { data: levelData, error: levelError } = await supabaseServer
           .from('levels')
           .select('*')
@@ -146,10 +158,15 @@ export async function GET(request: NextRequest) {
 
         if (!levelError && levelData) {
           currentLevel = levelData;
-          logger.info('Current level found', { level: levelData.title });
+          logger.info('Current level found', {
+            level: levelData.title,
+            durationMs: Date.now() - levelStartMs,
+          });
         }
       } catch (levelErr) {
-        logger.warn('Failed to fetch current level', { error: levelErr });
+        logger.warn('Failed to fetch current level', {
+          error: levelErr,
+        });
       }
     }
     

@@ -16,6 +16,8 @@ yarn-debug.log*
 yarn-error.log*
 
 env.txt
+# Storybook/Specstory artifacts
+.specstory/
 # Environment variables
 .env
 .env.local
@@ -107,6 +109,7 @@ tmp/
 temp/
 # clerk configuration (can include secrets)
 /.clerk/
+.clerk/.tmp/user_accounts.md
 
 # Production environment files
 .env.production.local

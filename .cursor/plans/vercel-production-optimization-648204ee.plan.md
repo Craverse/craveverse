@@ -1,4 +1,4 @@
-<!-- 648204ee-b8d4-41b2-b623-313954ee14de 209d8e80-103a-4b71-a4c4-d0f1b60893c5 -->
+<!-- 648204ee-b8d4-41b2-b623-313954ee14de 2a88dad1-e8c0-4612-b6e1-9b4cbc805685 -->
 # CraveVerse End-to-End Schema Finalization
 
 ## Step 1 – Cross-App Feature Inventory
@@ -23,6 +23,31 @@
 
 ### To-dos
 
+- [ ] Create comprehensive testing scripts with auto-timeouts
+- [ ] Create diagnosis script for automatic issue detection
+- [ ] Create auto-fix script for common issues
+- [ ] Create monitoring script for continuous performance tracking
+- [ ] Run initial test suite and diagnose current issues
+- [ ] Apply auto-fixes and verify improvements
+- [ ] Restore level detail UX and wire streak utils
+- [ ] Enhance map, fix mobile nav, enforce forum tier rules
+- [ ] Finish theme application, inventory UI, pause persistence, reward metrics
+- [ ] Implement unit/integration tests, Playwright e2e, PowerShell regression, monitoring hooks
+- [ ] Full QA pass and documentation
+- [ ] Resolve lint warnings across repo
+- [ ] Draft comprehensive cross-tab test checklist
+- [ ] Execute automated test suite (type-check, lint, unit/integration/e2e)
+- [ ] Summarize findings and document follow-ups
+- [ ] Update schema and env notes for quiz responses and button analytics
+- [ ] Persist quiz completion and user flags
+- [ ] Redirect post-signup to quiz and apply preferences
+- [ ] Record per-page button presses
+- [ ] Add integration test for mitigation alert flow
+- [ ] Inventory app features and map data requirements
+- [ ] Apply final edits to database/craveverse-complete-schema.sql
+- [ ] Verify RLS, helper functions, seeds, and edge-function needs
+- [ ] Run automated checks and capture final QA handoff summary
+- [ ] Stabilize onboarding/dashboard data fetches to avoid abort and ensure personalization renders
 - [ ] Inventory app features and map data requirements
 - [ ] Apply final edits to database/craveverse-complete-schema.sql
 - [ ] Verify RLS, helper functions, seeds, and edge-function needs

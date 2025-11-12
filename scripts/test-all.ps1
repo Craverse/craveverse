@@ -26,6 +26,9 @@ $testResults = @{
     Errors = @()
 }
 
+$devPort = if ($env:DEV_PORT) { [int]$env:DEV_PORT } else { 3000 }
+$baseUrl = "http://localhost:$devPort"
+
 function Test-WithTimeout {
     param(
         [string]$Name,
@@ -52,7 +55,7 @@ function Test-WithTimeout {
 Write-Host "`n[1/10] Testing Server Status..." -ForegroundColor Yellow
 $serverTest = Test-WithTimeout -Name "Server" -Timeout 10 -TestScript {
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:3000/api/health" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+        $response = Invoke-WebRequest -Uri "$baseUrl/api/health" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
         return $response.StatusCode -eq 200
     } catch {
         return $false
@@ -129,7 +132,7 @@ Write-Host "`n[5/10] Testing Page Load Performance..." -ForegroundColor Yellow
 $pageLoad = Test-WithTimeout -Name "PageLoad" -Timeout 15 -TestScript {
     try {
         $measure = Measure-Command {
-            $response = Invoke-WebRequest -Uri "http://localhost:3000" -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
+            $response = Invoke-WebRequest -Uri $baseUrl -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
         }
         return $measure.TotalSeconds -lt 3  # Should load in < 3 seconds
     } catch {
@@ -151,7 +154,7 @@ if (-not $Quick) {
     $authTest = Test-WithTimeout -Name "Auth" -Timeout 20 -TestScript {
         # Check if auth endpoints are accessible (not testing actual auth)
         try {
-            $signIn = Invoke-WebRequest -Uri "http://localhost:3000/sign-in" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+            $signIn = Invoke-WebRequest -Uri "$baseUrl/sign-in" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
             return $signIn.StatusCode -eq 200
         } catch {
             return $false
@@ -175,7 +178,7 @@ Write-Host "`n[7/10] Testing Database Connectivity..." -ForegroundColor Yellow
 $dbTest = Test-WithTimeout -Name "Database" -Timeout 10 -TestScript {
     try {
         # Try to access user profile API (should handle mock mode gracefully)
-        $response = Invoke-WebRequest -Uri "http://localhost:3000/api/user/profile" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+        $response = Invoke-WebRequest -Uri "$baseUrl/api/user/profile" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
         return $response.StatusCode -in @(200, 401)  # 401 is OK (not authenticated)
     } catch {
         return $false
@@ -247,10 +250,10 @@ $perfTest = Test-WithTimeout -Name "Performance" -Timeout 30 -TestScript {
     return $allFast
 }
 if ($perfTest) {
-    Write-Host "✅ Performance checks passed" -ForegroundColor Green
+    Write-Host "[OK] Performance checks passed" -ForegroundColor Green
     $testResults.Passed++
 } else {
-    Write-Host "⚠️ Some endpoints may be slow" -ForegroundColor Yellow
+    Write-Host "[WARN] Some endpoints may be slow" -ForegroundColor Yellow
     $testResults.Failed++
     $testResults.Errors += "Performance issues detected"
 }
@@ -258,7 +261,7 @@ if ($perfTest) {
 # Summary
 $elapsed = (Get-Date) - $startTime
 Write-Host "`n" + "=" * 60
-Write-Host "📊 Test Summary" -ForegroundColor Cyan
+Write-Host "[SUMMARY] Test Summary" -ForegroundColor Cyan
 Write-Host "   Passed:  $($testResults.Passed)" -ForegroundColor Green
 Write-Host "   Failed:  $($testResults.Failed)" -ForegroundColor Red
 Write-Host "   Skipped: $($testResults.Skipped)" -ForegroundColor Gray
@@ -266,11 +269,11 @@ Write-Host "   Time:    $($elapsed.TotalSeconds.ToString('F2'))s"
 Write-Host "=" * 60
 
 if ($testResults.Errors.Count -gt 0) {
-    Write-Host "`n❌ Errors Found:" -ForegroundColor Red
+Write-Host "`n[ERROR] Errors Found:" -ForegroundColor Red
     $testResults.Errors | ForEach-Object { Write-Host "   - $_" -ForegroundColor Yellow }
     exit 1
 } else {
-    Write-Host "`n✅ All tests passed!" -ForegroundColor Green
+    Write-Host "`n[OK] All tests passed!" -ForegroundColor Green
     exit 0
 }
 

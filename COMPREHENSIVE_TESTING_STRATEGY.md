@@ -16,6 +16,7 @@ Automated testing, diagnosis, and fixing strategy with timeout-based command exe
 ### 1.1 Health Check Tests
 - **Server Status**: Check if dev server is running
 - **Port Availability**: Verify port 3000/3001 is available
+- **Supabase Seed Verification**: Confirm `GET /api/levels/level-1` returns 200; if not, rerun `database/craveverse-complete-schema.sql` and `database/import-levels.sql`.
 - **Build Status**: Check if build succeeds
 - **Type Check**: Verify TypeScript compilation
 - **Dependencies**: Check if all packages are installed
